@@ -1,0 +1,32 @@
+name: Phase 1 static checks
+
+on:
+  push:
+    branches: ["security/**", "main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bash syntax check
+        run: bash -n scripts/install.sh
+      - name: ShellCheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          shellcheck --severity=error scripts/install.sh
+      - name: Block obvious destructive installer commands
+        run: |
+          if grep -En 'iptables[[:space:]].*(-F|-X|-P)|ufw[[:space:]]+disable|setenforce[[:space:]]+0|systemctl[[:space:]]+(stop|disable)[[:space:]]+(ssh|sshd|apache|firewalld|warp)' scripts/install.sh; then
+            echo "Unsafe command found in installer" >&2
+            exit 1
+          fi
+      - name: Verify source attribution exists
+        run: |
+          test -s LICENSE
+          grep -Fq 'yonggekkk/sing-box-yg' SECURITY.md
