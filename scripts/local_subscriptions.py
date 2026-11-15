@@ -7,6 +7,8 @@ proxy. No firewall, SSH, nginx, services, or sing-box settings are modified.
 """
 from __future__ import annotations
 import argparse
+from contextlib import contextmanager
+import fcntl
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -45,6 +47,29 @@ def state_dir(path: Path, create=False):
     return path
 
 
+@contextmanager
+def exclusive_writer(root: Path):
+    """Prevent simultaneous init/publish/rotate operations."""
+    state_dir(root, create=True)
+    lock = root / ".writer.lock"
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(lock, flags, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.geteuid():
+            raise ValueError("Unsafe subscription writer lock")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValueError("Another subscription write operation is in progress") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
 def private_json(path: Path):
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_size > MAX_FILE:
@@ -78,8 +103,13 @@ def valid_base(value: str | None, port: int):
     if value is None:
         return "http://127.0.0.1:" + str(port)
     p = urlsplit(value)
-    if not p.hostname or p.username or p.password or p.query or p.fragment or p.path not in ("", "/"):
-        raise ValueError("Public base URL must not contain credentials, query or path")
+    if (not p.hostname or p.username or p.password or p.query or p.fragment or
+            p.path not in ("", "/") or any(ch.isspace() for ch in value) or
+            "\\" in value or "%" in p.netloc or "@" in p.netloc):
+        raise ValueError("Public base URL must be a valid URL without credentials, query or path")
+    # Accessing .port deliberately validates port syntax.
+    if p.port is not None and not 1 <= p.port <= 65535:
+        raise ValueError("Invalid URL port")
     if p.scheme == "http" and p.hostname in ("127.0.0.1", "localhost"):
         if p.port != port:
             raise ValueError("Loopback URL must match local listen port")
@@ -299,12 +329,16 @@ def main(argv=None):
     os.umask(0o077)
     try:
         if args.action == "init":
-            init(args.state_dir, args.port, args.public_base_url)
+            with exclusive_writer(args.state_dir):
+                init(args.state_dir, args.port, args.public_base_url)
             print("Initialized. Run 'urls' privately to view subscription addresses.")
         elif args.action == "publish":
-            print("Local subscription files published:", publish(args.state_dir, args.source_dir))
+            with exclusive_writer(args.state_dir):
+                count = publish(args.state_dir, args.source_dir)
+            print("Local subscription files published:", count)
         elif args.action == "rotate":
-            rotate(args.state_dir, args.public_base_url)
+            with exclusive_writer(args.state_dir):
+                rotate(args.state_dir, args.public_base_url)
             print("Subscription URL rotated; previous URL revoked.")
         elif args.action == "urls":
             urls(args.state_dir)
