@@ -4,19 +4,26 @@ The automated test defined in `.github/workflows/debian-qemu-vm.yml`
 boots an official Debian 12 genericcloud **QEMU virtual machine**. It is
 not a Docker container and is not the user's VPS.
 
-## Current CI infrastructure result (2026-11-15)
+## Current full-VM CI result (2026-11-15)
 
-**BLOCKED, not PASS.** The first GitHub-hosted Ubuntu runner could not
-access the KVM kernel module (`Permission denied`). QEMU fell back to
-software TCG emulation, and the guest did not reach the lifecycle assertions
-within the timeout. This is an infrastructure capability limitation;
-it does **not** establish that the sing-box service installation failed.
+**Still NOT accepted as PASS.** The earliest GitHub-hosted runner denied KVM
+access, causing a software-emulated timeout. This was fixed by granting the
+CI runner user access to its own ephemeral /dev/kvm only; the KVM API
+check now passes.
 
-The workflow now checks `/dev/kvm` permissions **before downloading the
-hundreds-of-megabytes VM image**. If KVM is unavailable it fails fast and
-preserves this acceptance item as unverified. It no longer falls back to TCG.
-A future run needs an isolated disposable runner with accessible KVM, **not**
-the owner's Germany VPS. Do not bypass this gate to claim production approval.
+The next genuine Debian 12 VM booted, detected its NoCloud metadata, executed
+the test script and passed official sing-box v1.14.4 binary and configuration
+checks. Its dedicated systemd service did not remain active, so it could
+not complete reboot, failed-preflight and scoped uninstall assertions.
+
+The test-only service has since been revised to allow AF_NETLINK, with
+group-restricted readable configuration and detailed systemctl/journalctl
+output on failure. The QEMU workflow also verifies NoCloud ISO root
+contents and has a bounded timeout with serial console errors.
+
+The next run must pass all four mandatory serial markers before this
+test can be considered complete. The archived original fscarmen installer
+remains blocked from execution; this is a CI-only dedicated-service fixture.
 
 ## Security boundaries
 
