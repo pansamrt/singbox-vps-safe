@@ -137,7 +137,7 @@ jobs:
           MACHINE="$RUNNER_TEMP/sbci"
           # VM has no NIC or external network. The guest only sees a disposable
           # qcow2 overlay and two read-only ISOs. It cannot access host VPS creds.
-          if ! timeout --signal=TERM 660s qemu-system-x86_64 \
+          if ! timeout --signal=TERM --kill-after=5s 240s qemu-system-x86_64 \
             -machine q35,accel=kvm -cpu host -m 2048 -smp 2 \
             -display none -monitor none -serial "file:$MACHINE/serial.log" \
             -nic none -snapshot \
