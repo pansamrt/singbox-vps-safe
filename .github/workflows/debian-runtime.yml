@@ -1,0 +1,90 @@
+name: Debian runtime and fscarmen local subscription integration
+
+on:
+  push:
+    branches: ["test/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  debian-subscriptions:
+    name: Debian ${{ matrix.debian }} genuine sing-box runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        debian: ["12", "13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download pinned official sing-box binary (host staging only)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          VER=1.14.4
+          mkdir -p "$RUNNER_TEMP/core" "$RUNNER_TEMP/upstream-templates"
+          URL="https://github.com/SagerNet/sing-box/releases/download/v$VER/sing-box-$VER-linux-amd64.tar.gz"
+          curl --proto '=https' --tlsv1.2 -fL --max-time 90 --retry 2 -o "$RUNNER_TEMP/core/core.tar.gz" "$URL"
+          printf '%s  %s\n' '699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968' "$RUNNER_TEMP/core/core.tar.gz" | sha256sum --check --status
+          tar -xOzf "$RUNNER_TEMP/core/core.tar.gz" "sing-box-$VER-linux-amd64/sing-box" > "$RUNNER_TEMP/core/sing-box"
+          chmod 755 "$RUNNER_TEMP/core/sing-box"
+          "$RUNNER_TEMP/core/sing-box" version
+
+      - name: Download real pinned fscarmen client templates with Git blob validation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          REF=8b97614b782307d00a74de55d93a26c0d3a2286c
+          printf '%s\n' \
+            'clash 0c3eb7fcee464e49b71c7d18777fa51443d08fbf' \
+            'clash2 bc25549e5bfd3cdf9feeccc94e159e13fb7abe27' \
+            'sing-box f9a4184fc5512405f293003a6b1a1bbfd94eada9' |
+          while read -r name blob; do
+            file="$RUNNER_TEMP/upstream-templates/$name"
+            curl --proto '=https' --tlsv1.2 -fL --max-time 30 --retry 2 \
+              -o "$file" "https://raw.githubusercontent.com/fscarmen/client_template/$REF/$name"
+            python3 - "$file" "$blob" <<'PY'
+          import hashlib
+          import pathlib
+          import sys
+          data = pathlib.Path(sys.argv[1]).read_bytes()
+          actual = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\x00" + data).hexdigest()
+          if actual != sys.argv[2]:
+              raise SystemExit("Pinned upstream template Git blob mismatch")
+          print("Verified upstream template:", pathlib.Path(sys.argv[1]).name)
+          PY
+          done
+
+      - name: Build disposable Debian container (no host package changes)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker build --pull \
+            --build-arg "DEBIAN_RELEASE=${{ matrix.debian }}" \
+            -f tests/integration/Dockerfile \
+            -t "singbox-test:debian-${{ matrix.debian }}" .
+
+      - name: Run real sing-box + local subscription HTTP tests (isolated/no network)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker run --rm \
+            --network none \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=128m \
+            --pids-limit 96 \
+            --memory 1g \
+            --cpus 1.5 \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/work,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/core/sing-box,dst=/usr/local/bin/sing-box,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/upstream-templates,dst=/upstream-templates,readonly" \
+            --workdir /work \
+            "singbox-test:debian-${{ matrix.debian }}" \
+            python3 -B tests/integration/debian_runtime.py
