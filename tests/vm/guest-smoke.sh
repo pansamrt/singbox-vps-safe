@@ -16,8 +16,18 @@ say() {
 }
 die() {
   say "FAILED: $*"
+  trap - ERR
+  systemctl poweroff --no-wall >/dev/null 2>&1 || true
   exit 1
 }
+ci_error() {
+  local code="$1" line="$2"
+  trap - ERR
+  say "FAILED: unhandled guest test error at line $line (exit $code)"
+  systemctl poweroff --no-wall >/dev/null 2>&1 || true
+  exit "$code"
+}
+trap 'ci_error "$?" "$LINENO"' ERR
 hash_file() {
   if [ -f "$1" ]; then
     sha256sum "$1" | cut -d' ' -f1
