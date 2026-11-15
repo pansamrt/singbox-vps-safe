@@ -116,30 +116,12 @@ tar -xOzf "$WORK/sing-box.tar.gz" "sing-box-${VERSION}-linux-${ARCH}/sing-box" >
 chmod 755 "$WORK/sing-box"
 "$WORK/sing-box" version
 "$WORK/sing-box" check -c "$CONFIG_SOURCE" || die "Supplied configuration failed sing-box check"
-log "Config verified; checking requested listening ports against current services."
-if command -v python3 >/dev/null 2>&1; then
-  python3 - "$CONFIG_SOURCE" <<'PY'
-import json, socket, sys
-with open(sys.argv[1], encoding="utf8") as f:
-    conf = json.load(f)
-for inbound in conf.get("inbounds", []):
-    port = inbound.get("listen_port")
-    if port is None:
-        continue
-    if not isinstance(port, int) or not 1 <= port <= 65535:
-        sys.exit("Invalid listen_port")
-    proto = socket.SOCK_DGRAM if inbound.get("type") in ("hysteria2", "tuic") else socket.SOCK_STREAM
-    sock = socket.socket(socket.AF_INET, proto)
-    try:
-        sock.bind(("0.0.0.0", port))
-    except OSError as exc:
-        sys.exit(f"Port {port} appears unavailable: {exc}")
-    finally:
-        sock.close()
-PY
-else
-  die "python3 is required for port preflight"
+log "Config verified; checking IPv4/IPv6 TCP/UDP listen ports (read-only)."
+if ! command -v python3 >/dev/null 2>&1; then
+  die "python3 required for safe port preflight"
 fi
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+python3 "$SCRIPT_DIR/ports.py" --config "$CONFIG_SOURCE" || die "Port preflight failed; no installation performed"
 install -d -m 700 "$TARGET" /etc/singbox-vps-safe
 CHANGED=1
 install -m 755 "$WORK/sing-box" "$TARGET/sing-box"
