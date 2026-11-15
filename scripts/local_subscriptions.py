@@ -115,9 +115,37 @@ def init(root: Path, port: int, public_url: str | None):
 
 
 def rotate(root: Path):
+    """Revoke the old token AND rewrite locally published Clash provider links."""
     cfg = settings(root)
+    old_prefix = cfg["base"] + "/" + cfg["token"] + "/proxies"
     cfg["token"] = secrets.token_urlsafe(36)
-    atomic_json(root / "access.json", cfg)
+    old_gen = cfg["generation"]
+    if old_gen is None:
+        atomic_json(root / "access.json", cfg)
+        return
+    original = root / old_gen
+    if original.is_symlink() or not original.is_dir():
+        raise ValueError("Invalid existing generation")
+    new_gen = "gen-" + uuid.uuid4().hex
+    dest = root / new_gen
+    dest.mkdir(mode=0o700)
+    try:
+        for name in sorted(ALLOWED):
+            path = original / name
+            if not path.exists() and not path.is_symlink():
+                continue
+            payload = read_file(path)
+            if name in ("clash", "clash2"):
+                payload = payload.replace(old_prefix.encode(),
+                    (cfg["base"] + "/" + cfg["token"] + "/proxies").encode())
+            fd = os.open(dest / name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            with os.fdopen(fd, "wb") as out:
+                out.write(payload)
+        cfg["generation"] = new_gen
+        atomic_json(root / "access.json", cfg)
+    except BaseException:
+        shutil.rmtree(dest)
+        raise
 
 
 def read_file(path: Path):
