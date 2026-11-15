@@ -118,6 +118,9 @@ def verify_project_scripts(root: Path):
     )
     violations = []
     for path in (root / "scripts").rglob("*"):
+        # Auditor source embeds forbidden strings as detection patterns by design.
+        if path.name == "audit_upstream.py":
+            continue
         if path.is_file() and path.suffix in (".py", ".sh"):
             contents = path.read_text(encoding="utf8")
             for index, line in enumerate(contents.splitlines(), start=1):
