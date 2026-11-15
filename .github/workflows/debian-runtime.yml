@@ -75,6 +75,7 @@ jobs:
           set -Eeuo pipefail
           docker run --rm \
             --network none \
+            --add-host subscriptions.example.invalid:127.0.0.1 \
             --cap-drop ALL \
             --security-opt no-new-privileges \
             --read-only \
