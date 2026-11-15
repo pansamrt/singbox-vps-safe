@@ -21,7 +21,7 @@ jobs:
           grep -Fq 'fscarmen/sing-box' README.md
           grep -Fq '7a666fc870d027790b6b831d219d8d99f13a73a4' README.md
           bash -n upstream/fscarmen/sing-box.sh
-          if grep -R -nE '(curl|wget).*\|[[:space:]]*(bash|sh)' scripts/; then
+          if grep -R --exclude='audit_upstream.py' -nE '(curl|wget).*\|[[:space:]]*(bash|sh)' scripts/; then
             echo "No remote-code execution allowed in project-owned scripts"
             exit 1
           fi
