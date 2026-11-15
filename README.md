@@ -2,6 +2,13 @@
 
 **Experimental project — do not install on an existing production VPS.**
 
+> **Deployment ownership:** This project is developed and tested in GitHub only.
+> There is **no automatic deployment**, no agent access to the owner's VPS, and no
+> remote installer execution by the project team. After a reviewed, immutable
+> release is ready, the owner will choose and perform any installation manually.
+> See [MANUAL_DEPLOYMENT_POLICY.md](MANUAL_DEPLOYMENT_POLICY.md).
+
+
 A private, safety-oriented derivative of [yonggekkk/sing-box-yg](https://github.com/yonggekkk/sing-box-yg). Based on upstream commit [b13f9435](https://github.com/yonggekkk/sing-box-yg/commit/b13f9435c4792fccf04d4fbc73e24a1948abff1b), 2026-10-22.
 
 ## Current scope
