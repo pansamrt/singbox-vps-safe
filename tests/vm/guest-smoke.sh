@@ -121,7 +121,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 CapabilityBoundingSet=
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 
 [Install]
 WantedBy=multi-user.target
@@ -130,8 +130,12 @@ UNITFILE
   systemctl daemon-reload
   systemctl enable --now singbox-vps-safe-ci.service
   sleep 2
-  systemctl is-active --quiet singbox-vps-safe-ci.service ||
+  if ! systemctl is-active --quiet singbox-vps-safe-ci.service; then
+    say "Dedicated service failed: systemd status and journal follow"
+    systemctl status singbox-vps-safe-ci.service --no-pager -l 2>&1 | tail -n 45 | tee /dev/ttyS0 || true
+    journalctl -u singbox-vps-safe-ci.service -n 45 --no-pager -o cat 2>&1 | tee /dev/ttyS0 || true
     die "Dedicated VM service did not start"
+  fi
   say "Installed and started dedicated systemd service"
 
   # A new systemd one-shot runs only after the NEXT boot.
