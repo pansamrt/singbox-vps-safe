@@ -1,0 +1,107 @@
+name: Offline QEMU Debian full-VM lifecycle (safe test service only)
+
+on:
+  push:
+    branches: ["test/qemu-*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  full-vm-lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install QEMU and ISO tools on disposable GitHub runner
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 genisoimage
+      - name: Get official Debian 12 cloud image with checksum verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/sbci"
+          BASE="https://cloud.debian.org/images/cloud/bookworm/latest"
+          curl --proto '=https' --tlsv1.2 -fL --retry 3 --max-time 300 \
+            "$BASE/debian-12-genericcloud-amd64.qcow2" \
+            -o "$RUNNER_TEMP/sbci/debian.img"
+          curl --proto '=https' --tlsv1.2 -fL --retry 3 --max-time 30 \
+            "$BASE/SHA512SUMS" -o "$RUNNER_TEMP/sbci/SHA512SUMS"
+          HASH="$(grep -E 'debian-12-genericcloud-amd64.qcow2$' "$RUNNER_TEMP/sbci/SHA512SUMS" | awk '{print $1}')"
+          [[ "$HASH" =~ ^[0-9a-fA-F]{128}$ ]] || { echo "Official checksum not found"; exit 1; }
+          printf '%s  %s\n' "$HASH" "$RUNNER_TEMP/sbci/debian.img" | sha512sum -c -
+      - name: Get fixed sing-box v1.14.4 artifact and verify official SHA256
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          VER=1.14.4
+          BASE="https://github.com/SagerNet/sing-box/releases/download/v$VER"
+          curl --proto '=https' --tlsv1.2 -fL --retry 2 --max-time 90 \
+            "$BASE/sing-box-$VER-linux-amd64.tar.gz" -o "$RUNNER_TEMP/sbci/core.tgz"
+          printf '%s  %s\n' \
+            '699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968' \
+            "$RUNNER_TEMP/sbci/core.tgz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/sbci/payload"
+          tar -xOzf "$RUNNER_TEMP/sbci/core.tgz" \
+            "sing-box-$VER-linux-amd64/sing-box" > "$RUNNER_TEMP/sbci/payload/sing-box"
+          chmod 755 "$RUNNER_TEMP/sbci/payload/sing-box"
+          cp tests/vm/guest-smoke.sh "$RUNNER_TEMP/sbci/payload/guest-smoke.sh"
+          chmod 755 "$RUNNER_TEMP/sbci/payload/guest-smoke.sh"
+      - name: Build read-only NoCloud and payload ISOs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/sbci/seed"
+          cat > "$RUNNER_TEMP/sbci/seed/meta-data" <<'META'
+          instance-id: sbci-github-disposable
+          local-hostname: sbci-test
+          META
+          cat > "$RUNNER_TEMP/sbci/seed/user-data" <<'CLOUD'
+          #cloud-config
+          ssh_pwauth: false
+          disable_root: true
+          network:
+            config: disabled
+          runcmd:
+            - mkdir -p /mnt/sbci
+            - mount -o ro -L SBPAYLOAD /mnt/sbci
+            - bash /mnt/sbci/guest-smoke.sh first
+          power_state:
+            mode: reboot
+            timeout: 600
+            condition: test -f /root/sbci-first-stage-ok
+          CLOUD
+          genisoimage -quiet -r -J -V cidata \
+            -o "$RUNNER_TEMP/sbci/seed.iso" \
+            "$RUNNER_TEMP/sbci/seed/meta-data" "$RUNNER_TEMP/sbci/seed/user-data"
+          genisoimage -quiet -r -J -V SBPAYLOAD \
+            -o "$RUNNER_TEMP/sbci/payload.iso" "$RUNNER_TEMP/sbci/payload"
+      - name: Boot isolated real Debian VM and check install, reboot and uninstall
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          MACHINE="$RUNNER_TEMP/sbci"
+          # VM has no NIC or external network. The guest only sees a disposable
+          # qcow2 overlay and two read-only ISOs. It cannot access host VPS creds.
+          if ! timeout --signal=TERM 660s qemu-system-x86_64 \
+            -machine q35,accel=kvm:tcg -cpu max -m 2048 -smp 2 \
+            -display none -monitor none -serial "file:$MACHINE/serial.log" \
+            -nic none -snapshot \
+            -drive "file=$MACHINE/debian.img,if=virtio,format=qcow2" \
+            -drive "file=$MACHINE/seed.iso,media=cdrom,format=raw" \
+            -drive "file=$MACHINE/payload.iso,media=cdrom,format=raw" \
+            > "$MACHINE/qemu.log" 2>&1; then
+            echo "QEMU failed or timed out"
+            tail -n 100 "$MACHINE/qemu.log" || true
+            tail -n 160 "$MACHINE/serial.log" || true
+            exit 1
+          fi
+          grep -F 'SBVM_FIRST_STAGE_PASS' "$MACHINE/serial.log"
+          grep -F 'SBVM_REBOOT_RECOVERY_PASS' "$MACHINE/serial.log"
+          grep -F 'SBVM_FAILED_UPDATE_PREFLIGHT_PASS' "$MACHINE/serial.log"
+          grep -F 'SBVM_INSTALL_REBOOT_FAILURE_UNINSTALL_PASS' "$MACHINE/serial.log"
+          echo "QEMU Debian 12 safe fixture full-VM lifecycle PASS"
