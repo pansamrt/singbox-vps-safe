@@ -56,8 +56,13 @@ jobs:
             -keyout /etc/singbox-vps-safe/key.pem \
             -out /etc/singbox-vps-safe/cert.pem >/dev/null 2>&1
           for proto in hysteria2 tuic anytls; do
+            case "$proto" in
+              hysteria2) PORT=53546 ;; # UDP 53546 may coexist with TCP Reality 53546
+              tuic) PORT=53547 ;;
+              anytls) PORT=53548 ;;
+            esac
             python3 scripts/generate_config.py \
-              --protocol "$proto" --port 53545 \
+              --protocol "$proto" --port "$PORT" \
               --server-name example.org \
               --tls-cert /etc/singbox-vps-safe/cert.pem \
               --tls-key /etc/singbox-vps-safe/key.pem \
