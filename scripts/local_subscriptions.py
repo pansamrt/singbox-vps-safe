@@ -1,0 +1,293 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
+"""fscarmen local subscription publisher. No external conversion or QR APIs.
+
+Only binds 127.0.0.1. Remote clients require an owner-configured HTTPS reverse
+proxy. No firewall, SSH, nginx, services, or sing-box settings are modified.
+"""
+from __future__ import annotations
+import argparse
+import hmac
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shutil
+import stat
+import sys
+from urllib.parse import urlsplit
+import uuid
+
+ROOT = Path("/var/lib/singbox-vps-safe/local-subscriptions")
+SOURCE = Path("/etc/sing-box/subscribe")
+ALLOWED = frozenset({"v2rayn", "throne", "shadowrocket", "clash",
+                     "clash2", "proxies", "sing-box", "sing-box-pc",
+                     "sing-box-phone", "sing-box2", "neko"})
+NAMES = ALLOWED | {"auto", "auto2"}
+TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{40,128}$")
+PATH_RE = re.compile(r"^/([A-Za-z0-9_-]{40,128})/([A-Za-z0-9-]+)$")
+GEN_RE = re.compile(r"^gen-[a-f0-9]{32}$")
+MAX_FILE = 2 * 1024 * 1024
+
+
+def state_dir(path: Path, create=False):
+    if path.is_symlink():
+        raise ValueError("State symlink refused")
+    if create:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+        raise ValueError("Invalid state directory/owner")
+    if info.st_mode & 0o077:
+        raise ValueError("State directory must have 0700 permissions")
+    return path
+
+
+def private_json(path: Path):
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_size > MAX_FILE:
+        raise ValueError("Unsafe private configuration")
+    with path.open(encoding="utf8") as f:
+        result = json.load(f)
+    if not isinstance(result, dict):
+        raise ValueError("Expected JSON object")
+    return result
+
+
+def atomic_json(path: Path, obj: dict):
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise ValueError("Unsafe destination")
+    tmp = path.with_name("." + path.name + "-" + secrets.token_hex(8))
+    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf8") as out:
+            json.dump(obj, out, ensure_ascii=False, sort_keys=True)
+            out.write("\n")
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def valid_base(value: str | None, port: int):
+    if not 1 <= port <= 65535:
+        raise ValueError("Invalid listen port")
+    if value is None:
+        return "http://127.0.0.1:" + str(port)
+    p = urlsplit(value)
+    if not p.hostname or p.username or p.password or p.query or p.fragment or p.path not in ("", "/"):
+        raise ValueError("Public base URL must not contain credentials, query or path")
+    if p.scheme == "http" and p.hostname in ("127.0.0.1", "localhost"):
+        if p.port != port:
+            raise ValueError("Loopback URL must match local listen port")
+    elif p.scheme != "https" or p.hostname in ("localhost", "127.0.0.1", "::1"):
+        raise ValueError("Public subscription URLs require HTTPS")
+    return value.rstrip("/")
+
+
+def settings(root: Path):
+    state_dir(root)
+    data = private_json(root / "access.json")
+    if data.get("schema") != 1 or not TOKEN_RE.fullmatch(str(data.get("token", ""))):
+        raise ValueError("Invalid token")
+    port = data.get("port")
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("Invalid port")
+    if data.get("base") != valid_base(data.get("base"), port):
+        raise ValueError("Invalid URL")
+    gen = data.get("generation")
+    if gen is not None and (not isinstance(gen, str) or not GEN_RE.fullmatch(gen)):
+        raise ValueError("Invalid generation")
+    return data
+
+
+def init(root: Path, port: int, public_url: str | None):
+    state_dir(root, create=True)
+    cfg = root / "access.json"
+    if cfg.exists() or cfg.is_symlink():
+        raise ValueError("Already initialized: use rotate")
+    atomic_json(cfg, {"schema": 1, "token": secrets.token_urlsafe(36),
+                      "port": port, "base": valid_base(public_url, port),
+                      "generation": None})
+
+
+def rotate(root: Path):
+    cfg = settings(root)
+    cfg["token"] = secrets.token_urlsafe(36)
+    atomic_json(root / "access.json", cfg)
+
+
+def read_file(path: Path):
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE:
+        raise ValueError("Source is not a safe regular file under 2 MiB")
+    with path.open("rb") as f:
+        data = f.read(MAX_FILE + 1)
+    if len(data) > MAX_FILE:
+        raise ValueError("Too much input")
+    return data
+
+
+def fix_clash_provider(payload: bytes, url: str):
+    text = payload.decode("utf8")
+    # Replace only YAML URL entries ending in /proxies, not remote rule sets.
+    regex = re.compile(r'(?m)^(\s*url:\s*)(["\x27]?)(https?://[^\s"\x27]+/proxies)(["\x27]?)\s*$')
+    def sub(match):
+        if match.group(2) != match.group(4):
+            raise ValueError("Malformed YAML provider quotation")
+        return match.group(1) + match.group(2) + url + match.group(4)
+    return regex.sub(sub, text).encode("utf8")
+
+
+def publish(root: Path, source: Path):
+    cfg = settings(root)
+    if source.is_symlink() or not source.is_dir():
+        raise ValueError("Invalid fscarmen subscription directory")
+    generation = "gen-" + uuid.uuid4().hex
+    folder = root / generation
+    folder.mkdir(mode=0o700)
+    count = 0
+    try:
+        for name in sorted(ALLOWED):
+            entry = source / name
+            if not entry.exists() and not entry.is_symlink():
+                continue
+            data = read_file(entry)
+            if name in ("clash", "clash2"):
+                data = fix_clash_provider(data, cfg["base"] + "/" + cfg["token"] + "/proxies")
+            out = folder / name
+            fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            count += 1
+        if not count:
+            raise ValueError("No fscarmen subscription files found")
+        cfg["generation"] = generation
+        atomic_json(root / "access.json", cfg)
+    except BaseException:
+        shutil.rmtree(folder)
+        raise
+    return count
+
+
+def auto_file(agent: str, alternate: bool, available: set[str]):
+    agent = agent.lower()
+    if "shadowrocket" in agent:
+        choices = ("shadowrocket", "v2rayn")
+    elif "clash" in agent or "mihomo" in agent:
+        choices = ("clash2" if alternate else "clash", "clash", "proxies")
+    elif any(k in agent for k in ("sing-box", "singbox", "sfi", "sfa", "sfm")):
+        choices = ("sing-box2" if alternate else "sing-box", "sing-box", "sing-box-phone")
+    elif "throne" in agent:
+        choices = ("throne", "v2rayn")
+    else:
+        choices = ("v2rayn", "shadowrocket", "sing-box")
+    return next((name for name in choices if name in available), None)
+
+
+class Handler(BaseHTTPRequestHandler):
+    root = ROOT
+    server_version = "LocalSubscription"
+    sys_version = ""
+
+    def log_message(self, fmt, *args):
+        # URLs contain bearer tokens. Never print the request path in logs.
+        return
+
+    def do_HEAD(self):
+        self.respond(False)
+
+    def do_GET(self):
+        self.respond(True)
+
+    def respond(self, body: bool):
+        try:
+            cfg = settings(self.root)
+            parsed = urlsplit(self.path)
+            match = PATH_RE.fullmatch(parsed.path)
+            if parsed.query or parsed.fragment or "%" in parsed.path or not match:
+                self.send_error(404); return
+            if not hmac.compare_digest(match.group(1), cfg["token"]):
+                self.send_error(404); return
+            name = match.group(2)
+            if name not in NAMES or cfg["generation"] is None:
+                self.send_error(404); return
+            folder = self.root / cfg["generation"]
+            if folder.is_symlink() or not folder.is_dir():
+                self.send_error(404); return
+            available = {x for x in ALLOWED if (folder / x).is_file() and not (folder / x).is_symlink()}
+            if name in ("auto", "auto2"):
+                name = auto_file(self.headers.get("User-Agent", ""), name == "auto2", available)
+            if name not in available:
+                self.send_error(404); return
+            payload = read_file(folder / name)
+            mime = "application/json" if name.startswith("sing-box") else (
+                "text/yaml" if name in ("clash", "clash2", "proxies") else "text/plain"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", mime + "; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "private, no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
+            self.end_headers()
+            if body:
+                self.wfile.write(payload)
+        except (OSError, ValueError, json.JSONDecodeError):
+            self.send_error(404)
+
+
+def urls(root: Path):
+    cfg = settings(root)
+    prefix = cfg["base"] + "/" + cfg["token"]
+    print("PRIVATE URLs - whoever has a URL can access the node credentials:")
+    for fmt in ("auto", "auto2", "v2rayn", "clash", "clash2", "proxies",
+                "sing-box", "shadowrocket", "throne"):
+        print(fmt + ": " + prefix + "/" + fmt)
+    if cfg["base"].startswith("http://"):
+        print("Loopback addresses work only on the VPS. For remote clients use your own HTTPS reverse proxy.")
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--state-dir", type=Path, default=ROOT)
+    sub = p.add_subparsers(dest="action", required=True)
+    init_cmd = sub.add_parser("init")
+    init_cmd.add_argument("--port", type=int, default=8787)
+    init_cmd.add_argument("--public-base-url")
+    pub = sub.add_parser("publish")
+    pub.add_argument("--source-dir", type=Path, default=SOURCE)
+    for action in ("rotate", "urls", "serve"):
+        sub.add_parser(action)
+    args = p.parse_args(argv)
+    os.umask(0o077)
+    try:
+        if args.action == "init":
+            init(args.state_dir, args.port, args.public_base_url)
+            print("Initialized. Run 'urls' privately to view subscription addresses.")
+        elif args.action == "publish":
+            print("Local subscription files published:", publish(args.state_dir, args.source_dir))
+        elif args.action == "rotate":
+            rotate(args.state_dir)
+            print("Subscription token rotated; old URL revoked.")
+        elif args.action == "urls":
+            urls(args.state_dir)
+        else:
+            cfg = settings(args.state_dir)
+            handler = type("BoundHandler", (Handler,), {"root": args.state_dir})
+            with ThreadingHTTPServer(("127.0.0.1", cfg["port"]), handler) as server:
+                server.daemon_threads = True
+                print("Local-only subscription server: http://127.0.0.1:" + str(cfg["port"]))
+                server.serve_forever()
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print("ERROR:", exc, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
