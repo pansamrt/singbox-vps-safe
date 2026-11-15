@@ -1,0 +1,35 @@
+name: Pinned fscarmen installer safety gate
+
+on:
+  push:
+    branches: ["audit/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  upstream-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check original Bash syntax WITHOUT executing it
+        run: bash -n upstream/fscarmen/sing-box.sh
+      - name: Scan pinned archived original for unsafe operations
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/audit_upstream.py --strict --report "$RUNNER_TEMP/upstream-audit.json"
+          python3 -m json.tool "$RUNNER_TEMP/upstream-audit.json" >/dev/null
+          echo "Original installer execution remains blocked; audit is read-only."
+      - name: Run auditor and local subscription unit tests
+        run: |
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Ensure CI has no unsafe original installer invocation
+        run: |
+          if grep -R -nE '(^|[[:space:]])(sudo[[:space:]]+)?(bash|sh)[[:space:]]+upstream/fscarmen/sing-box[.]sh' .github/workflows; then
+            echo "CI MUST NOT execute unaudited original installer" >&2
+            exit 1
+          fi
