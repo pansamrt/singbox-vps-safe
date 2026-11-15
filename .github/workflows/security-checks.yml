@@ -29,7 +29,19 @@ jobs:
       - name: Python protocol-generator unit tests
         run: python3 -m unittest discover -s tests -v
       - name: Python syntax check
-        run: python3 -m py_compile scripts/generate_config.py scripts/state.py scripts/update.py scripts/combine_configs.py scripts/ports.py
+        run: python3 -m py_compile scripts/generate_config.py scripts/state.py scripts/update.py scripts/combine_configs.py scripts/ports.py scripts/extensions.py
+      - name: Verify optional tools stay independent and non-executing
+        run: |
+          python3 scripts/extensions.py sources
+          python3 scripts/extensions.py status
+          bash scripts/sb.sh --extension-sources
+          bash scripts/sb.sh --extension-status
+          if grep -En 'os[.]system|subprocess[.]Popen|subprocess[.]run|subprocess[.]call|shell=True|chmod[(]0o755|chmod[(]0o700' scripts/extensions.py | grep -v -E 'subprocess[.]run[(][[]executable,'; then
+            echo "Review potentially executable code in external tools manager" >&2
+            exit 1
+          fi
+          grep -Fq 'os.O_EXCL' scripts/extensions.py
+          grep -Fq 'NoRedirects' scripts/extensions.py
       - name: Require explicit confirmation and prohibit scheduled upgrades
         run: |
           grep -Fq -- '--update requires --confirm' scripts/update.py
