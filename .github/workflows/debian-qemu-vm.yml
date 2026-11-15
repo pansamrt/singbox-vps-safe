@@ -19,6 +19,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Validate guest script syntax without running it
+        run: |
+          set -Eeuo pipefail
+          bash -n tests/vm/guest-smoke.sh
+          test -s tests/vm/README.md
+          echo "Guest lifecycle script syntax PASS; original fscarmen installer not executed."
+      - name: Require accessible hardware KVM (fail fast; never fall back to slow TCG)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ ! -c /dev/kvm ] || [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "::error::FULL VM BLOCKED: GitHub runner cannot access /dev/kvm."
+            echo "::error::Do NOT treat the QEMU full-VM test as passed."
+            echo "Use a separate disposable CI runner with KVM access. No owner VPS is required."
+            exit 1
+          fi
+          echo "KVM is available for isolated Debian VM testing."
       - name: Install QEMU and ISO tools on disposable GitHub runner
         run: |
           sudo apt-get update -qq
@@ -91,7 +108,7 @@ jobs:
           # VM has no NIC or external network. The guest only sees a disposable
           # qcow2 overlay and two read-only ISOs. It cannot access host VPS creds.
           if ! timeout --signal=TERM 660s qemu-system-x86_64 \
-            -machine q35,accel=kvm:tcg -cpu max -m 2048 -smp 2 \
+            -machine q35,accel=kvm -cpu host -m 2048 -smp 2 \
             -display none -monitor none -serial "file:$MACHINE/serial.log" \
             -nic none -snapshot \
             -drive "file=$MACHINE/debian.img,if=virtio,format=qcow2" \
