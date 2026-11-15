@@ -10,18 +10,23 @@
 1. **No VPS deployment:** No SSH/scp to live servers; no commands run on the owner's
    servers; no remote service restart; no firewall/iptables/nftables, DNS,
    routing, WARP, or existing proxy modifications.
-2. **No GitHub-based auto-deployment:** Do not add repository secrets holding VPS
+2. **Version reminders vs installation:** The owner may run an on-demand
+   read-only official release check or view an update notice on opening the
+   `sb` menu. A version notice never authorizes a download, restart or
+   installation. Only the owner can manually invoke and confirm an update
+   of the dedicated singbox-vps-safe core after choosing to deploy this project.
+3. **No GitHub-based auto-deployment:** Do not add repository secrets holding VPS
    credentials, SSH private keys, access tokens, host names, or addresses. GitHub
    Actions must be limited to source checks, test fixtures and short-lived CI
    environments. There must be no production deployment job, webhook, updater
    or remote command channel.
-3. **Manual release only:** Release a documented, immutable tag/commit after the
+4. **Manual release only:** Release a documented, immutable tag/commit after the
    acceptance criteria below have passed. Publish the changes, integrity hashes,
    known limitations and rollback steps; do not claim completion solely because
    GitHub Actions are green.
-4. **No remote code execution:** Never recommend `curl | bash`, a moving default
+5. **No remote code execution:** Never recommend `curl | bash`, a moving default
    branch as a privileged installer, or `--insecure`/certificate-check bypasses.
-5. **Existing services are out of scope:** The project must never silently stop,
+6. **Existing services are out of scope:** The project must never silently stop,
    disable, replace, or hijack the original `sing-box` unit, Hysteria2, SSH,
    WARP, firewall, system DNS, or any other service.
 
@@ -34,8 +39,12 @@
 - [x] Draft versioned backup / explicit restore routines with simulated test cases.
 - [ ] Complete, safe interactive `sb` management UX and validated multi-inbound use.
 - [ ] Certificate acquisition, storage, renewal, failure handling and expiry alerts.
-- [ ] Explicit manual upgrade with config validation, pre-upgrade snapshot and
-      verified rollback after failed restart; no unattended upgrades.
+- [x] Draft explicit owner-confirmed core updater with stable-release check,
+      official artifact SHA256 verification, configuration preflight,
+      pre-update snapshot and attempted rollback after failure.
+- [ ] Integration-test the core updater on disposable VMs, including
+      download failure, config incompatibility, service restart failure,
+      interruption, and preserved SSH/firewall/other services.
 - [ ] Client configuration export without accidental secret disclosure.
 - [ ] End-to-end Debian 12/13, supported Ubuntu, amd64 and arm64 checks.
 - [ ] Disposable test-VM failure injection, port collisions (IPv4/IPv6),
