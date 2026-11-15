@@ -4,7 +4,7 @@ ARG DEBIAN_RELEASE=12
 FROM debian:${DEBIAN_RELEASE}-slim
 
 RUN apt-get update -qq \
- && apt-get install -y --no-install-recommends python3 ca-certificates \
+ && apt-get install -y --no-install-recommends python3 ca-certificates nginx-light openssl \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work
