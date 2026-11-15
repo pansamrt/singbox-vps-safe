@@ -30,6 +30,18 @@
    disable, replace, or hijack the original `sing-box` unit, Hysteria2, SSH,
    WARP, firewall, system DNS, or any other service.
 
+## Optional third-party VPS utilities / 可选第三方 VPS 工具
+
+KejiLion (`kejilion/sh`) and Actions-bbr-v3 (`byJoey/Actions-bbr-v3`)
+are **not sing-box dependencies** and must remain opt-in, independently
+managed extensions. The `sb` menu may display project information and
+read-only kernel/network status, or download fixed-commit source copies for
+human review. It must NOT automatically run a third-party installer, modify
+sysctl or routing, install a kernel, reboot, or change other system services.
+A source download alone is never approval to execute it.
+
+See [OPTIONAL_TOOLS.md](OPTIONAL_TOOLS.md).
+
 ## Development completion criteria / 开发完成标准
 
 - [ ] Security review of the original script and every ported dependency/feature.
