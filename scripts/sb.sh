@@ -56,6 +56,36 @@ generate_interactive() {
   python3 "$ROOT/scripts/generate_config.py" "${args[@]}"
 }
 
+extensions_menu() {
+  local choice target token tool
+  while true; do
+    printf '\n=== Optional VPS extensions (NOT installed automatically) ===\n'
+    printf '1) Show upstream sources, fixed commits and risks\n'
+    printf '2) Read-only kernel/BBR/KejiLion status\n'
+    printf '3) Download KejiLion pinned script for source review ONLY\n'
+    printf '4) Download BBRv3 pinned script for source review ONLY\n'
+    printf '0) Back\n'
+    read -r -p 'Select [0-4]: ' choice || return 0
+    case "$choice" in
+      1) python3 "$ROOT/scripts/extensions.py" sources ;;
+      2) python3 "$ROOT/scripts/extensions.py" status ;;
+      3|4)
+        if [[ "$choice" == 3 ]]; then tool=kejilion; else tool=bbr-v3; fi
+        echo 'WARNING: third-party scripts can modify firewall, kernel, SSH, routing or networking.'
+        echo 'This operation only downloads a pinned, verified, NON-EXECUTABLE file for inspection.'
+        read -r -p 'Enter a NEW local file path for review copy: ' target || return 0
+        if [[ -z "$target" ]]; then echo 'Cancelled'; continue; fi
+        read -r -p 'Type DOWNLOAD to confirm: ' token || return 0
+        if [[ "$token" != DOWNLOAD ]]; then echo 'Cancelled'; continue; fi
+        python3 "$ROOT/scripts/extensions.py" download "$tool" "$target"
+        ;;
+      10) extensions_menu ;;
+      0) return 0 ;;
+      *) echo 'Invalid selection; no changes.' >&2 ;;
+    esac
+  done
+}
+
 menu() {
   local choice config reply
   echo 'Checking official stable sing-box version (read-only; 12s timeout)...'
@@ -71,8 +101,9 @@ menu() {
     printf '7) Restore named backup (root + explicit confirmation)\n'
     printf '8) Check latest official sing-box version (read-only)\n'
     printf '9) One-click manual sing-box core update (root + confirmation)\n'
+    printf '10) Optional external VPS tool references (separate; no auto-install)\n'
     printf '0) Exit\n'
-    read -r -p 'Select [0-9]: ' choice || return 0
+    read -r -p 'Select [0-10]: ' choice || return 0
     case "$choice" in
       1) status ;;
       2) bash "$ROOT/scripts/install.sh" --plan ;;
@@ -144,6 +175,9 @@ case "${1:---menu}" in
     [[ $# -eq 2 && "$2" == '--confirm' ]] || { usage; exit 2; }
     python3 "$ROOT/scripts/update.py" --update --confirm
     ;;
+  --extensions) [[ $# -eq 1 ]] || { usage; exit 2; }; extensions_menu ;;
+  --extension-sources) [[ $# -eq 1 ]] || { usage; exit 2; }; python3 "$ROOT/scripts/extensions.py" sources ;;
+  --extension-status) [[ $# -eq 1 ]] || { usage; exit 2; }; python3 "$ROOT/scripts/extensions.py" status ;;
   --help|-h) usage ;;
   *) usage; exit 2 ;;
 esac
