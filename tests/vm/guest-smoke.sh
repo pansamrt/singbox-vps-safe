@@ -86,7 +86,8 @@ first_stage() {
 }
 JSON
   useradd --system --user-group --no-create-home --shell /usr/sbin/nologin sbci
-  chown root:sbci "$CFG"
+  chown root:sbci /etc/singbox-vps-safe-ci "$CFG"
+  chmod 750 /etc/singbox-vps-safe-ci
   chmod 640 "$CFG"
   "$BIN" version | grep -Fq "sing-box version 1.14.4" ||
     die "Verified core version changed"
