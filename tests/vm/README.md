@@ -4,6 +4,20 @@ The automated test defined in `.github/workflows/debian-qemu-vm.yml`
 boots an official Debian 12 genericcloud **QEMU virtual machine**. It is
 not a Docker container and is not the user's VPS.
 
+## Current CI infrastructure result (2026-11-15)
+
+**BLOCKED, not PASS.** The first GitHub-hosted Ubuntu runner could not
+access the KVM kernel module (`Permission denied`). QEMU fell back to
+software TCG emulation, and the guest did not reach the lifecycle assertions
+within the timeout. This is an infrastructure capability limitation;
+it does **not** establish that the sing-box service installation failed.
+
+The workflow now checks `/dev/kvm` permissions **before downloading the
+hundreds-of-megabytes VM image**. If KVM is unavailable it fails fast and
+preserves this acceptance item as unverified. It no longer falls back to TCG.
+A future run needs an isolated disposable runner with accessible KVM, **not**
+the owner's Germany VPS. Do not bypass this gate to claim production approval.
+
 ## Security boundaries
 
 - Download Debian 12 cloud QCOW2 and verify the SHA512 listed on the
