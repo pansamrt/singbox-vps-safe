@@ -5,6 +5,8 @@ GPL-3.0-only. Does NOT touch firewall, SSH, DNS, other systemd units or ports.
 Draft code: validate on disposable VPS before production use.
 """
 import argparse
+from contextlib import contextmanager
+import fcntl
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -117,6 +119,29 @@ def snapshot_root(layout: Layout) -> Path:
     root = layout.state / "snapshots"
     ensure_private_directory(root)
     return root
+
+
+@contextmanager
+def operation_lock(layout: Layout):
+    """Exclusive lock for manual updates and snapshot/restore operations."""
+    ensure_private_directory(layout.state)
+    lock_path = layout.state / "operation.lock"
+    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(lock_path, flags, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise RuntimeError("Unsafe operation lock permissions/owner")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("Another backup, restore or core update is running") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 def create_snapshot(layout: Layout, ctl: Systemd, reason: str = "manual") -> str:
@@ -237,18 +262,19 @@ def main() -> int:
     os.umask(0o077)
     layout, ctl = Layout(), Systemd()
     try:
-        if args.backup:
-            print("Snapshot created:", create_snapshot(layout, ctl))
-        elif args.list:
-            root = snapshot_root(layout)
-            for item in sorted(root.iterdir()):
-                if SNAPSHOT_ID.fullmatch(item.name) and item.is_dir() and not item.is_symlink():
-                    print(item.name)
-        elif args.restore:
-            if not args.confirm:
-                p.error("--restore requires --confirm")
-            undo_id = restore_snapshot(layout, ctl, args.restore)
-            print("Restored dedicated service snapshot. Pre-restore backup:", undo_id)
+        if args.restore and not args.confirm:
+            p.error("--restore requires --confirm")
+        with operation_lock(layout):
+            if args.backup:
+                print("Snapshot created:", create_snapshot(layout, ctl))
+            elif args.list:
+                root = snapshot_root(layout)
+                for item in sorted(root.iterdir()):
+                    if SNAPSHOT_ID.fullmatch(item.name) and item.is_dir() and not item.is_symlink():
+                        print(item.name)
+            elif args.restore:
+                undo_id = restore_snapshot(layout, ctl, args.restore)
+                print("Restored dedicated service snapshot. Pre-restore backup:", undo_id)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
