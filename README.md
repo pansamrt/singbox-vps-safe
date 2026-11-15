@@ -68,6 +68,25 @@ The generator creates two **private** (0600) files: the server config (`hy2.json
 3. On a **fresh disposable VPS**, run `sudo bash scripts/install.sh --install /path/to/reviewed-config.json` and verify status/client connectivity.
 4. Existing Hysteria2, SSH, firewall, DNS and other services must be unchanged. Do not use the existing Germany VPS as a first test target.
 
+## Optional external VPS utilities (independent, no auto-install)
+
+The `sb` menu includes an independent **Optional external VPS tools** submenu:
+
+- [KejiLion](https://github.com/kejilion/sh): server management toolbox;
+- [Actions-bbr-v3](https://github.com/byJoey/Actions-bbr-v3): custom kernel and TCP BBR tools.
+
+These tools are **not installed, executed, or invoked as part of sing-box
+installation**. The extension offers only source information, a read-only
+local kernel status report, and explicitly downloaded, pinned, non-executable
+source copies for manual review. BBRv3 kernel changes can break VPS boot and
+SSH access. See [OPTIONAL_TOOLS.md](OPTIONAL_TOOLS.md) for safety/attribution.
+
+```bash
+bash scripts/sb.sh --extensions
+bash scripts/sb.sh --extension-sources
+bash scripts/sb.sh --extension-status
+```
+
 ## Official sing-box update reminders and one-click manual updates
 
 The safe `sb` menu checks the latest **stable** release using the official
