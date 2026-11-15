@@ -161,12 +161,15 @@ def main(argv: list[str] | None = None) -> int:
         config, client = build_config(args.protocol, args.port, args.listen, args.server_name,
                                       args.tls_cert, args.tls_key, args.handshake_host,
                                       args.reality_binary)
+        created_output = False
         try:
             private_write(output, config)
+            created_output = True
             private_write(client_output, client)
         except BaseException:
-            # Only a file created by this invocation may be removed.
-            output.unlink(missing_ok=True)
+            # Never unlink a path that might have appeared before our exclusive creation.
+            if created_output:
+                output.unlink(missing_ok=True)
             raise
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
