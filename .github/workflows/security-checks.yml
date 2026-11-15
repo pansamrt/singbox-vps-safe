@@ -29,7 +29,15 @@ jobs:
       - name: Python protocol-generator unit tests
         run: python3 -m unittest discover -s tests -v
       - name: Python syntax check
-        run: python3 -m py_compile scripts/generate_config.py scripts/state.py
+        run: python3 -m py_compile scripts/generate_config.py scripts/state.py scripts/update.py
+      - name: Require explicit confirmation and prohibit scheduled upgrades
+        run: |
+          grep -Fq -- '--update requires --confirm' scripts/update.py
+          grep -Fq -- 'UPDATE AVAILABLE. Manual confirmation is required' scripts/update.py
+          if grep -En 'curl.*\|[[:space:]]*(ba)?sh|--insecure|ufw disable|iptables -F|ssh .*@|systemctl (stop|disable) (ssh|sshd)' scripts/update.py; then
+            echo "Unsafe operation or remote deploy pattern in updater" >&2
+            exit 1
+          fi
       - name: Validate generated protocols using pinned sing-box v1.14.4
         shell: bash
         run: |
