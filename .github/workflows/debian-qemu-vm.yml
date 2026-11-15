@@ -122,8 +122,8 @@ jobs:
               -o "$RUNNER_TEMP/sbci/payload.iso" sing-box guest-smoke.sh
           )
           echo "Validating seed ISO root and payload ISO root before guest boot"
-          isoinfo -i "$RUNNER_TEMP/sbci/seed.iso" -f | tee "$RUNNER_TEMP/sbci/seed-contents.txt"
-          isoinfo -i "$RUNNER_TEMP/sbci/payload.iso" -f | tee "$RUNNER_TEMP/sbci/payload-contents.txt"
+          isoinfo -i "$RUNNER_TEMP/sbci/seed.iso" -J -f | tee "$RUNNER_TEMP/sbci/seed-contents.txt"
+          isoinfo -i "$RUNNER_TEMP/sbci/payload.iso" -J -f | tee "$RUNNER_TEMP/sbci/payload-contents.txt"
           grep -Eiq '^/user.data(;1)?
       - name: Boot isolated real Debian VM and check install, reboot and uninstall
         shell: bash
