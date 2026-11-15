@@ -72,6 +72,7 @@ first_stage() {
   [ ! -e "$UNIT" ] || die "Refuse to overwrite existing unit"
   [ ! -e "$CFG" ] || die "Refuse to overwrite existing config"
   [ ! -e "$BIN" ] || die "Refuse to overwrite existing binary"
+  if getent passwd sbci >/dev/null 2>&1; then die "Refuse existing test system user"; fi
   snapshot_invariants
   install -d -m 755 /opt/singbox-vps-safe-ci
   install -d -m 700 /etc/singbox-vps-safe-ci
@@ -84,7 +85,9 @@ first_stage() {
   "route": {"final":"direct"}
 }
 JSON
-  chmod 600 "$CFG"
+  useradd --system --user-group --no-create-home --shell /usr/sbin/nologin sbci
+  chown root:sbci "$CFG"
+  chmod 640 "$CFG"
   "$BIN" version | grep -Fq "sing-box version 1.14.4" ||
     die "Verified core version changed"
   "$BIN" check -c "$CFG" || die "Real core configuration validation failed"
@@ -97,8 +100,8 @@ After=local-fs.target
 
 [Service]
 Type=simple
-User=nobody
-Group=nogroup
+User=sbci
+Group=sbci
 ExecStart=/opt/singbox-vps-safe-ci/sing-box run -c /etc/singbox-vps-safe-ci/config.json
 Restart=on-failure
 RestartSec=1
@@ -162,6 +165,7 @@ after_reboot() {
   systemctl disable --now singbox-vps-safe-ci.service
   rm -f -- "$UNIT" "$CFG" "$BIN"
   rmdir /opt/singbox-vps-safe-ci /etc/singbox-vps-safe-ci
+  userdel sbci
   systemctl daemon-reload
   systemctl reset-failed singbox-vps-safe-ci.service >/dev/null 2>&1 || true
   [ ! -e "$UNIT" ] && [ ! -e "$CFG" ] && [ ! -e "$BIN" ] ||
