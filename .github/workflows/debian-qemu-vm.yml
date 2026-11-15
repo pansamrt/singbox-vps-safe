@@ -123,15 +123,33 @@ jobs:
           MACHINE="$RUNNER_TEMP/sbci"
           # VM has no NIC or external network. The guest only sees a disposable
           # qcow2 overlay and two read-only ISOs. It cannot access host VPS creds.
-          if ! timeout --signal=TERM 660s qemu-system-x86_64 \
+          timeout --signal=TERM --kill-after=5s 390s qemu-system-x86_64 \
             -machine q35,accel=kvm -cpu host -m 2048 -smp 2 \
             -display none -monitor none -serial "file:$MACHINE/serial.log" \
             -nic none -snapshot \
             -drive "file=$MACHINE/debian.img,if=virtio,format=qcow2" \
             -drive "file=$MACHINE/seed.iso,media=cdrom,format=raw" \
             -drive "file=$MACHINE/payload.iso,media=cdrom,format=raw" \
-            > "$MACHINE/qemu.log" 2>&1; then
-            echo "QEMU failed or timed out"
+            > "$MACHINE/qemu.log" 2>&1 &
+          QEMU_WRAPPER_PID=$!
+          LAST_BYTES=0
+          while kill -0 "$QEMU_WRAPPER_PID" 2>/dev/null; do
+            sleep 15
+            if [ -f "$MACHINE/serial.log" ]; then
+              BYTES="$(wc -c < "$MACHINE/serial.log")"
+              if [ "$BYTES" -gt "$LAST_BYTES" ]; then
+                echo "--- Recent guest serial output ---"
+                tail -n 6 "$MACHINE/serial.log" || true
+                LAST_BYTES="$BYTES"
+              fi
+            fi
+          done
+          set +e
+          wait "$QEMU_WRAPPER_PID"
+          QEMU_RC=$?
+          set -e
+          if [ "$QEMU_RC" -ne 0 ]; then
+            echo "QEMU did not exit normally (code=$QEMU_RC)"
             tail -n 100 "$MACHINE/qemu.log" || true
             tail -n 160 "$MACHINE/serial.log" || true
             exit 1
