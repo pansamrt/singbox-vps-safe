@@ -136,8 +136,16 @@ jobs:
             tail -n 160 "$MACHINE/serial.log" || true
             exit 1
           fi
-          grep -F 'SBVM_FIRST_STAGE_PASS' "$MACHINE/serial.log"
-          grep -F 'SBVM_REBOOT_RECOVERY_PASS' "$MACHINE/serial.log"
-          grep -F 'SBVM_FAILED_UPDATE_PREFLIGHT_PASS' "$MACHINE/serial.log"
-          grep -F 'SBVM_INSTALL_REBOOT_FAILURE_UNINSTALL_PASS' "$MACHINE/serial.log"
+          for marker in \
+            SBVM_FIRST_STAGE_PASS \
+            SBVM_REBOOT_RECOVERY_PASS \
+            SBVM_FAILED_UPDATE_PREFLIGHT_PASS \
+            SBVM_INSTALL_REBOOT_FAILURE_UNINSTALL_PASS; do
+            if ! grep -Fq "$marker" "$MACHINE/serial.log"; then
+              echo "Missing mandatory VM marker: $marker" >&2
+              tail -n 160 "$MACHINE/serial.log" >&2 || true
+              exit 1
+            fi
+            echo "PASS: $marker"
+          done
           echo "QEMU Debian 12 safe fixture full-VM lifecycle PASS"
