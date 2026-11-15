@@ -20,7 +20,7 @@ A private, safety-oriented derivative of [yonggekkk/sing-box-yg](https://github.
 - `SECURITY.md` — threat model and validation gates.
 - `.github/workflows/security-checks.yml` — syntax, static security checks, unit tests and actual sing-box config checks.
 
-**Not ported:** the original interactive `sb` feature set, in-place upgrades, certificate issuance, WARP, Argo, token publishing and port hopping. Generated configs contain only one inbound, not all four at once.
+**Not ported:** the original full `sb` feature set, automatic config migrations, certificate issuance, WARP, Argo, token publishing and port hopping. Generated configs contain only one inbound, not all four at once.
 
 ## Safe read-only inspection
 
@@ -34,7 +34,7 @@ bash scripts/sb.sh --menu
 
 ## Generate configs locally (review before use)
 
-Python 3.9+ is required for the generator; it does not require root or network access.
+Python 3.10+ is required for the generator; it does not require root or network access.
 
 Hysteria2 example:
 
@@ -67,6 +67,47 @@ The generator creates two **private** (0600) files: the server config (`hy2.json
 2. Run `bash scripts/install.sh --plan` and inspect the printed listening ports.
 3. On a **fresh disposable VPS**, run `sudo bash scripts/install.sh --install /path/to/reviewed-config.json` and verify status/client connectivity.
 4. Existing Hysteria2, SSH, firewall, DNS and other services must be unchanged. Do not use the existing Germany VPS as a first test target.
+
+## Official sing-box update reminders and one-click manual updates
+
+The safe `sb` menu checks the latest **stable** release using the official
+[SagerNet/sing-box releases](https://github.com/SagerNet/sing-box/releases/latest)
+API whenever the menu opens. It displays the installed version, current stable
+version, release page and a release-note excerpt. Checking is **read-only**:
+no update or download of a core is performed by this operation.
+
+```bash
+# Check available stable version, no root required and no changes
+bash scripts/sb.sh --check-update
+
+# After reviewing the official release notes, perform a manual core update
+sudo bash scripts/sb.sh --update-core --confirm
+
+# Or open the menu, select 9, and type UPDATE to approve
+sudo bash scripts/sb.sh --menu
+```
+
+The updater is restricted to **the dedicated singbox-vps-safe service** and its
+binary. It will not update the original `sing-box` service or other scripts.
+
+Safety gates: root and explicit confirmation; known dedicated unit; active
+service; official stable version; an exact architecture-matched official release;
+SHA256 digest from GitHub's release metadata; staged binary version verification;
+`sing-box check` against the current config; exclusive operation lock; a
+versioned pre-update backup; a restart and follow-up health check. Restart failure
+triggers an attempt to restore the previous snapshot.
+
+**This is a convenience upgrade of the sing-box core only.** It does not
+automatically update the install/management scripts, issue certificates, modify
+firewall or DNS, or perform migrations across breaking core releases.
+
+The updater uses GitHub over HTTPS for version information and downloads.
+If the official digest is absent, download fails, the new binary breaks config,
+or the dedicated service is not running, **it refuses to upgrade**. There are no
+background checks, scheduled tasks, timers, auto-upgrades or remote VPS actions.
+
+**Before real use:** Manual update and rollback still require controlled test-VM
+failure-injection. For now, keep all PRs as drafts and deploy nowhere.
 
 ## Dedicated backup and rollback (experimental)
 
