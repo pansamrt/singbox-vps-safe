@@ -64,6 +64,9 @@ menu() {
     printf '2) Read-only installation plan\n'
     printf '3) Generate one protocol configuration\n'
     printf '4) Install reviewed configuration (root, disposable VPS only)\n'
+    printf '5) Create versioned backup (root)\n'
+    printf '6) List versioned backups (root)\n'
+    printf '7) Restore named backup (root + explicit confirmation)\n'
     printf '0) Exit\n'
     read -r -p 'Select [0-7]: ' choice || return 0
     case "$choice" in
