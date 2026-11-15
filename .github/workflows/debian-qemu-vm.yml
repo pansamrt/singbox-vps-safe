@@ -103,6 +103,9 @@ jobs:
           network:
             config: disabled
           runcmd:
+            # Disposable guest only: avoid a second wait-online timeout after reboot.
+            # No network device is attached to this QEMU guest.
+            - systemctl mask systemd-networkd-wait-online.service
             - mkdir -p /mnt/sbci
             - mount -o ro -L SBPAYLOAD /mnt/sbci
             - bash /mnt/sbci/guest-smoke.sh first
