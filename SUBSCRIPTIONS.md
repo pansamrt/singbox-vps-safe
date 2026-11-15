@@ -89,12 +89,25 @@ installation entrypoint.
 - [x] No third-party conversion/QR API calls in local publisher
 - [x] Independent random bearer token; rotation and Clash provider rewrite
 - [x] Local-only server; strict allowlist and no URL logging
-- [ ] CI and offline unit tests on the current branch
+- [x] GitHub Actions offline unit tests and real sing-box core + HTTPS subscription runtime integration on disposable Debian 12/13 containers (see tests/integration/README.md)
 - [ ] Failure injection, token changes during publication, lock tests
-- [ ] Disposable test-VM integration with real fscarmen-generated files
-- [ ] Manual reverse proxy / trusted HTTPS client import validation
+- [ ] Disposable full-VM installation with genuinely fscarmen-generated subscription files (the existing container tests use pinned authentic templates with synthetic node values)
+- [x] Real Nginx reverse proxy test with disposable private CA, strict TLS hostname/CA validation
+- [ ] Public-CA domain HTTPS and real-client subscription imports
 - [ ] Security audit and safe migration of the upstream installer
 - [ ] fscarmen-safe version updater and independent optional extensions rebase
+
+## 2026-11-15 Debian runtime verification
+
+The isolated CI matrix has now actually started official sing-box v1.14.4,
+proxied loopback HTTP traffic, served local fscarmen-template subscriptions
+via Nginx HTTPS, checked token rotation and verified strict TLS CA behavior
+on Debian 12 and 13. See [tests/integration/README.md](tests/integration/README.md).
+
+The original fscarmen one-click installer was **not** executed, as it has
+systemwide effects and insecure remote-download operations that require
+a separate audit before full virtual-machine testing. This is an important
+remaining production-release blocker.
 
 ## Do not deploy
 
