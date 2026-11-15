@@ -26,7 +26,7 @@ The new `scripts/install.sh` is **not** a drop-in replacement for the original i
 1. No VPS integration test has been performed. A successful syntax or CI test does not imply safe production operation.
 2. The installer does not provision a configuration, cert, domain or subscription. Bring a reviewed `config.json` that passes `sing-box check`.
 3. Port checking is a best-effort IPv4 bind test, not a comprehensive IPv6/systemd socket/UDP-sharing detector. Do not deploy until testing confirms all chosen ports.
-4. Rollback is only for failure during an initial installation; an upgrade command and persistent snapshot/restore interface have **not** been implemented.
+4. Initial-install rollback is separate from the experimental snapshot/restore tool. The new root-only `scripts/state.py` supports versioned backups and manually confirmed restore of three owned files, but **no in-place upgrade command exists** and rollback needs disposable-VPS integration tests.
 5. TLS secrets should be stored within the dedicated directory with appropriate permissions. The unit has `ProtectHome=true`, so references to `/root` will not work.
 6. Proxy routing, TUN, reverse-proxy, TProxy, WARP, firewall configuration and existing shared service migration are out of scope.
 7. Original functions such as managed certificates, Argo, subscription publication, GitLab tokens, Telegram alerts, port hopping and interactive menu are not yet safely ported.
@@ -46,7 +46,15 @@ The new `scripts/install.sh` is **not** a drop-in replacement for the original i
 ## Next improvements
 
 - Interactive `sb` management compatible with safe defaults.
-- Versioned persistent backups + explicit rollback, including re-install and upgrade.
+- Validate versioned backup + explicit rollback on disposable VMs, then implement safe in-place upgrade.
 - Service non-root feasibility by supported inbound type and certificate layout.
 - Additional protocol presets and safe ACME workflow after separate dependency review.
 - GitHub Actions static checks plus integration tests in disposable VMs.
+\n## Snapshot and restore trust boundaries
+
+- `scripts/state.py` requires root. It stores snapshots under `/var/lib/singbox-vps-safe/snapshots` with directory mode 0700, saved files 0600 (binary 0700).
+- Every snapshot is checked against SHA256 manifest digests before use. This detects damage, but **does not authenticate a malicious root user** who can edit both payload and manifest.
+- Recovery changes only the dedicated binary, JSON config and dedicated systemd unit. It does not change SSH, DNS, firewall, routing, other proxy services, cron or system package management.
+- A pre-restore snapshot is created before replacing any files; failed start attempts to restore previous files and service state. This needs live VM failure-injection testing.
+- The snapshot includes credentials. Never commit, export or share snapshot contents.
+- In-place updates, ACME renewal, IPv6 conflict detection, and multi-inbound deployments remain out of scope.
