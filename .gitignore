@@ -1,0 +1,18 @@
+# Private connection parameters and TLS materials. Ignore rules do not replace review.
+*.client.json
+*.secret.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.csr
+*.log
+__pycache__/
+*.pyc
+# Common local generated configs: never commit credentials.
+hy2.json
+reality.json
+tuic.json
+anytls.json
+config.json
