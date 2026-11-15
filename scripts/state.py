@@ -78,12 +78,14 @@ def copy_no_follow(source: Path, target: Path, mode: int) -> str:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     in_fd = os.open(source, flags)
     digest = hashlib.sha256()
+    created_target = False
     try:
         with os.fdopen(in_fd, "rb") as f:
             if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
                 raise RuntimeError("Source changed to non-regular file")
             out_fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
                              getattr(os, "O_NOFOLLOW", 0), 0o600)
+            created_target = True
             with os.fdopen(out_fd, "wb") as out:
                 while True:
                     chunk = f.read(1024 * 1024)
@@ -94,7 +96,8 @@ def copy_no_follow(source: Path, target: Path, mode: int) -> str:
                 out.flush()
                 os.fsync(out.fileno())
     except BaseException:
-        target.unlink(missing_ok=True)
+        if created_target:
+            target.unlink(missing_ok=True)
         raise
     target.chmod(mode)
     return digest.hexdigest()
