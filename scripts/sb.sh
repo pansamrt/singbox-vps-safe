@@ -6,7 +6,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 usage() {
   cat <<'TXT'
-Usage: bash scripts/sb.sh [--menu|--status|--plan|--generate ...|--install CONFIG]
+Usage: bash scripts/sb.sh [--menu|--status|--plan|--generate ...|--install CONFIG]\n       sudo bash scripts/sb.sh [--backup|--snapshots|--restore ID --confirm]
 Only the dedicated singbox-vps-safe unit is managed.
 No SSH, DNS, firewall, routing, WARP or unrelated service modifications.
 TXT
@@ -65,7 +65,7 @@ menu() {
     printf '3) Generate one protocol configuration\n'
     printf '4) Install reviewed configuration (root, disposable VPS only)\n'
     printf '0) Exit\n'
-    read -r -p 'Select [0-4]: ' choice || return 0
+    read -r -p 'Select [0-7]: ' choice || return 0
     case "$choice" in
       1) status ;;
       2) bash "$ROOT/scripts/install.sh" --plan ;;
@@ -77,6 +77,22 @@ menu() {
         fi
         read -r -p 'Reviewed config JSON path: ' config || return
         bash "$ROOT/scripts/install.sh" --install "$config"
+        ;;
+      5)
+        if [[ $EUID -ne 0 ]]; then echo 'Root required for backups.' >&2; continue; fi
+        python3 "$ROOT/scripts/state.py" --backup
+        ;;
+      6)
+        if [[ $EUID -ne 0 ]]; then echo 'Root required to list private backups.' >&2; continue; fi
+        python3 "$ROOT/scripts/state.py" --list
+        ;;
+      7)
+        if [[ $EUID -ne 0 ]]; then echo 'Root required to restore backups.' >&2; continue; fi
+        local snap confirm
+        read -r -p 'Snapshot ID: ' snap || return 0
+        read -r -p 'Type RESTORE to confirm: ' confirm || return 0
+        if [[ "$confirm" != 'RESTORE' ]]; then echo 'Cancelled'; continue; fi
+        python3 "$ROOT/scripts/state.py" --restore "$snap" --confirm
         ;;
       0) return 0 ;;
       *) echo 'Invalid choice; no changes.' >&2 ;;
@@ -92,6 +108,12 @@ case "${1:---menu}" in
     shift
     [[ $# -eq 1 ]] || { usage; exit 2; }
     bash "$ROOT/scripts/install.sh" --install "$1"
+    ;;
+  --backup) [[ $# -eq 1 ]] || { usage; exit 2; }; python3 "$ROOT/scripts/state.py" --backup ;;
+  --snapshots) [[ $# -eq 1 ]] || { usage; exit 2; }; python3 "$ROOT/scripts/state.py" --list ;;
+  --restore)
+    [[ $# -eq 3 && "$3" == '--confirm' ]] || { usage; exit 2; }
+    python3 "$ROOT/scripts/state.py" --restore "$2" --confirm
     ;;
   --help|-h) usage ;;
   *) usage; exit 2 ;;
