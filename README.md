@@ -13,7 +13,7 @@ A private, safety-oriented derivative of [yonggekkk/sing-box-yg](https://github.
 - `SECURITY.md` — threat model and validation gates.
 - `.github/workflows/security-checks.yml` — syntax, static security checks, unit tests and actual sing-box config checks.
 
-**Not ported:** the original interactive `sb` feature set, in-place upgrades, persistent rollback, certificate issuance, WARP, Argo, token publishing and port hopping. Generated configs contain only one inbound, not all four at once.
+**Not ported:** the original interactive `sb` feature set, in-place upgrades, certificate issuance, WARP, Argo, token publishing and port hopping. Generated configs contain only one inbound, not all four at once.
 
 ## Safe read-only inspection
 
@@ -60,6 +60,32 @@ The generator creates two **private** (0600) files: the server config (`hy2.json
 2. Run `bash scripts/install.sh --plan` and inspect the printed listening ports.
 3. On a **fresh disposable VPS**, run `sudo bash scripts/install.sh --install /path/to/reviewed-config.json` and verify status/client connectivity.
 4. Existing Hysteria2, SSH, firewall, DNS and other services must be unchanged. Do not use the existing Germany VPS as a first test target.
+
+## Dedicated backup and rollback (experimental)
+
+These commands operate **only** on `/opt/singbox-vps-safe/sing-box`,
+`/etc/singbox-vps-safe/config.json`, and
+`/etc/systemd/system/singbox-vps-safe.service`. They never edit unrelated
+systemd units, existing sing-box instances, firewall rules or SSH settings.
+
+```bash
+sudo bash scripts/sb.sh --backup
+sudo bash scripts/sb.sh --snapshots
+sudo bash scripts/sb.sh --restore 20261115T120000Z-0123abcd --confirm
+```
+
+The snapshot ID in the third line is only an **example**. Choose an actual ID from
+`--snapshots`. A snapshot contains sensitive configuration, so files and the
+private snapshot directory are root-owned and permission-restricted.
+
+Restore verifies SHA256 checksums, checks the chosen configuration using its
+saved binary, creates an additional **pre-restore backup**, stops **only**
+`singbox-vps-safe.service`, and updates its three owned files. If restart fails,
+it attempts to restore the previous snapshot automatically.
+
+**This recovery mechanism has automated unit tests only.** It still needs
+failure-injection and connectivity tests on a disposable VPS. Do not use on
+the existing live VPS until those gates are passed.
 
 ## GPL and attribution
 
