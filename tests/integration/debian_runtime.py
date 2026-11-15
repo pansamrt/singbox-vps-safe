@@ -189,8 +189,10 @@ http {{
 }}
 """)
     nginx = shutil.which("nginx") or "/usr/sbin/nginx"
-    subprocess.run([nginx, "-t", "-c", str(config)], capture_output=True,
-                   check=True, timeout=8)
+    validation = subprocess.run([nginx, "-t", "-c", str(config)],
+                                capture_output=True, text=True, timeout=8)
+    if validation.returncode:
+        raise RuntimeError("Nginx test failed: " + validation.stderr[-800:])
     process = subprocess.Popen([nginx, "-c", str(config), "-g", "daemon off;"],
                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     wait_port(https_port, process)
