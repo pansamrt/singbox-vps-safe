@@ -1,9 +1,12 @@
 name: Offline QEMU Debian full-VM lifecycle (safe test service only)
 
 on:
-  push:
-    branches: ["test/qemu-*"]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: qemu-fullvm-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
