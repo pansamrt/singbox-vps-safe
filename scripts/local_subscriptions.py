@@ -114,10 +114,12 @@ def init(root: Path, port: int, public_url: str | None):
                       "generation": None})
 
 
-def rotate(root: Path):
-    """Revoke the old token AND rewrite locally published Clash provider links."""
+def rotate(root: Path, public_url: str | None = None):
+    """Rotate token and, if requested, change HTTPS public origin atomically."""
     cfg = settings(root)
     old_prefix = cfg["base"] + "/" + cfg["token"] + "/proxies"
+    if public_url is not None:
+        cfg["base"] = valid_base(public_url, cfg["port"])
     cfg["token"] = secrets.token_urlsafe(36)
     old_gen = cfg["generation"]
     if old_gen is None:
@@ -289,7 +291,9 @@ def main(argv=None):
     init_cmd.add_argument("--public-base-url")
     pub = sub.add_parser("publish")
     pub.add_argument("--source-dir", type=Path, default=SOURCE)
-    for action in ("rotate", "urls", "serve"):
+    rotating = sub.add_parser("rotate")
+    rotating.add_argument("--public-base-url", help="optional HTTPS URL; rotates token as well")
+    for action in ("urls", "serve"):
         sub.add_parser(action)
     args = p.parse_args(argv)
     os.umask(0o077)
@@ -300,8 +304,8 @@ def main(argv=None):
         elif args.action == "publish":
             print("Local subscription files published:", publish(args.state_dir, args.source_dir))
         elif args.action == "rotate":
-            rotate(args.state_dir)
-            print("Subscription token rotated; old URL revoked.")
+            rotate(args.state_dir, args.public_base_url)
+            print("Subscription URL rotated; previous URL revoked.")
         elif args.action == "urls":
             urls(args.state_dir)
         else:
