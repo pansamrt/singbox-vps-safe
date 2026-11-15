@@ -287,11 +287,14 @@ def integration():
             check(tls_headers.get("Cache-Control") == "private, no-store",
                   "TLS response retains cache restrictions")
             try:
-                with http.client.HTTPSConnection("subscriptions.example.invalid",
-                         tls_port, context=ssl.create_default_context(), timeout=3) as unknown:
+                unknown = http.client.HTTPSConnection("subscriptions.example.invalid",
+                         tls_port, context=ssl.create_default_context(), timeout=3)
+                try:
                     unknown.request("GET", prefix + "auto")
                     unknown.getresponse()
-                raise AssertionError("Untrusted TLS certificate was accepted")
+                    raise AssertionError("Untrusted TLS certificate was accepted")
+                finally:
+                    unknown.close()
             except ssl.SSLCertVerificationError:
                 check(True, "TLS client refuses untrusted subscription certificate")
             rejected, _, _ = https_get(tls_port, trust_root, "/wrong/clash", "Clash")
