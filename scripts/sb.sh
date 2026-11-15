@@ -57,7 +57,9 @@ generate_interactive() {
 }
 
 menu() {
-  local choice config
+  local choice config reply
+  echo 'Checking official stable sing-box version (read-only; 12s timeout)...'
+  python3 "$ROOT/scripts/update.py" --check || echo 'Version check unavailable; nothing was changed.' >&2
   while true; do
     printf '\n=== singbox-vps-safe (experimental) ===\n'
     printf '1) View dedicated service status\n'
@@ -67,8 +69,10 @@ menu() {
     printf '5) Create versioned backup (root)\n'
     printf '6) List versioned backups (root)\n'
     printf '7) Restore named backup (root + explicit confirmation)\n'
+    printf '8) Check latest official sing-box version (read-only)\n'
+    printf '9) One-click manual sing-box core update (root + confirmation)\n'
     printf '0) Exit\n'
-    read -r -p 'Select [0-7]: ' choice || return 0
+    read -r -p 'Select [0-9]: ' choice || return 0
     case "$choice" in
       1) status ;;
       2) bash "$ROOT/scripts/install.sh" --plan ;;
@@ -97,6 +101,20 @@ menu() {
         if [[ "$confirm" != 'RESTORE' ]]; then echo 'Cancelled'; continue; fi
         python3 "$ROOT/scripts/state.py" --restore "$snap" --confirm
         ;;
+      8)
+        python3 "$ROOT/scripts/update.py" --check
+        ;;
+      9)
+        if [[ $EUID -ne 0 ]]; then
+          echo 'Please use sudo bash scripts/sb.sh --update-core --confirm' >&2
+          continue
+        fi
+        echo 'Only the dedicated singbox-vps-safe core is updated.'
+        echo 'This will create a backup, verify SHA256 and new config, restart the dedicated service.'
+        read -r -p 'Type UPDATE to proceed (anything else cancels): ' reply || return 0
+        if [[ "$reply" != 'UPDATE' ]]; then echo 'Cancelled, no changes.'; continue; fi
+        python3 "$ROOT/scripts/update.py" --update --confirm
+        ;;
       0) return 0 ;;
       *) echo 'Invalid choice; no changes.' >&2 ;;
     esac
@@ -117,6 +135,14 @@ case "${1:---menu}" in
   --restore)
     [[ $# -eq 3 && "$3" == '--confirm' ]] || { usage; exit 2; }
     python3 "$ROOT/scripts/state.py" --restore "$2" --confirm
+    ;;
+  --check-update)
+    [[ $# -eq 1 ]] || { usage; exit 2; }
+    python3 "$ROOT/scripts/update.py" --check
+    ;;
+  --update-core)
+    [[ $# -eq 2 && "$2" == '--confirm' ]] || { usage; exit 2; }
+    python3 "$ROOT/scripts/update.py" --update --confirm
     ;;
   --help|-h) usage ;;
   *) usage; exit 2 ;;
