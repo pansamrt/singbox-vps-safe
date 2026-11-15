@@ -10,6 +10,8 @@ The Docker runtime has no external network, capabilities, or host system mounts.
 from __future__ import annotations
 
 import base64
+import ssl
+import shutil
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -140,6 +142,73 @@ def fixture_files(folder: Path, port: int):
     return example_uuid
 
 
+def make_https_proxy(home: Path, backend_port: int, https_port: int):
+    """Disposable nginx + locally signed test CA; real certificate validation."""
+    ca_key, ca, key, csr, cert = (home / x for x in
+                                  ("ca.key", "ca.crt", "server.key", "server.csr", "server.crt"))
+    hostname = "subscriptions.example.invalid"
+    ext = home / "server.ext"
+    ext.write_text("subjectAltName=DNS:" + hostname + "\nextendedKeyUsage=serverAuth\n")
+    commands = [
+        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256", "-nodes",
+         "-days", "1", "-keyout", str(ca_key), "-out", str(ca),
+         "-subj", "/CN=Disposable CI Testing CA",
+         "-addext", "basicConstraints=critical,CA:TRUE"],
+        ["openssl", "req", "-newkey", "rsa:2048", "-nodes",
+         "-keyout", str(key), "-out", str(csr),
+         "-subj", "/CN=" + hostname],
+        ["openssl", "x509", "-req", "-in", str(csr),
+         "-CA", str(ca), "-CAkey", str(ca_key), "-CAcreateserial",
+         "-out", str(cert), "-days", "1", "-sha256", "-extfile", str(ext)],
+    ]
+    for args in commands:
+        subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                       check=True, timeout=15)
+    config = home / "nginx-sub.conf"
+    config.write_text(f"""
+worker_processes 1;
+pid {home}/nginx.pid;
+error_log {home}/nginx-error.log warn;
+events {{ worker_connections 128; }}
+http {{
+    access_log off;
+    proxy_temp_path /tmp/nginx-proxy;
+    client_body_temp_path /tmp/nginx-client;
+    server {{
+        listen 127.0.0.1:{https_port} ssl;
+        server_name {hostname};
+        ssl_certificate {cert};
+        ssl_certificate_key {key};
+        location / {{
+            proxy_pass http://127.0.0.1:{backend_port};
+            proxy_set_header Host $host;
+            proxy_set_header User-Agent $http_user_agent;
+            proxy_buffering off;
+        }}
+    }}
+}}
+""")
+    nginx = shutil.which("nginx") or "/usr/sbin/nginx"
+    subprocess.run([nginx, "-t", "-c", str(config)], capture_output=True,
+                   check=True, timeout=8)
+    process = subprocess.Popen([nginx, "-c", str(config), "-g", "daemon off;"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    wait_port(https_port, process)
+    return process, ca
+
+
+def https_get(port: int, ca: Path, path: str, agent: str):
+    context = ssl.create_default_context(cafile=str(ca))
+    conn = http.client.HTTPSConnection("subscriptions.example.invalid", port,
+                                     context=context, timeout=4)
+    try:
+        conn.request("GET", path, headers={"User-Agent": agent})
+        r = conn.getresponse()
+        return r.status, r.read(), dict(r.getheaders())
+    finally:
+        conn.close()
+
+
 def integration():
     check(BINARY.exists() and BINARY.is_file(), "Pinned official sing-box core present")
     version = subprocess.run([str(BINARY), "version"], capture_output=True, text=True, check=True, timeout=10)
@@ -153,6 +222,7 @@ def integration():
         proxy_port = free_port()
         echo_port = free_port()
         sub_port = free_port()
+        tls_port = free_port()
         config = {
             "log": {"level": "warn"},
             "inbounds": [{"type": "socks", "tag": "runtime-socks",
@@ -171,6 +241,7 @@ def integration():
         core = subprocess.Popen([str(BINARY), "run", "-c", str(config_path)],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         server = None
+        nginx_proc = None
         try:
             wait_port(proxy_port, core)
             socks5_echo(proxy_port, echo_port)
@@ -179,7 +250,7 @@ def integration():
             node_uuid = fixture_files(source, proxy_port)
             state = home / "private"
             with subs.exclusive_writer(state):
-                subs.init(state, sub_port, "https://subscriptions.example.invalid")
+                subs.init(state, sub_port, f"https://subscriptions.example.invalid:{tls_port}")
                 count = subs.publish(state, source)
             check(count == 7, "Seven client-format subscription files published locally")
             info = subs.settings(state)
@@ -193,6 +264,8 @@ def integration():
                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
             )
             wait_port(sub_port, server)
+            nginx_proc, trust_root = make_https_proxy(home, sub_port, tls_port)
+            check(True, "Real nginx HTTPS reverse proxy initialized with disposable test CA")
             token = info["token"]
             prefix = "/" + token + "/"
             for agent, path, marker in (
@@ -208,8 +281,23 @@ def integration():
                 check(headers.get("Cache-Control") == "private, no-store",
                       "Sensitive subscription never cached by HTTP service")
 
+            tls_code, tls_data, tls_headers = https_get(tls_port, trust_root, prefix + "auto", "Clash-Verge")
+            check(tls_code == 200 and b"proxy-providers:" in tls_data,
+                  "Trusted TLS nginx proxy forwards client-specific subscription")
+            check(tls_headers.get("Cache-Control") == "private, no-store",
+                  "TLS response retains cache restrictions")
+            try:
+                with http.client.HTTPSConnection("subscriptions.example.invalid",
+                         tls_port, context=ssl.create_default_context(), timeout=3) as unknown:
+                    unknown.request("GET", prefix + "auto")
+                    unknown.getresponse()
+                raise AssertionError("Untrusted TLS certificate was accepted")
+            except ssl.SSLCertVerificationError:
+                check(True, "TLS client refuses untrusted subscription certificate")
+            rejected, _, _ = https_get(tls_port, trust_root, "/wrong/clash", "Clash")
+            check(rejected == 404, "HTTPS reverse proxy rejects invalid bearer token")
             ok, body, _ = get(sub_port, prefix + "clash")
-            provider = "https://subscriptions.example.invalid/" + token + "/proxies"
+            provider = f"https://subscriptions.example.invalid:{tls_port}/" + token + "/proxies"
             check(ok == 200 and provider.encode() in body,
                   "Real fscarmen Clash template now uses independent tokenized HTTPS provider URL")
             check(node_uuid.encode() not in body,
@@ -239,6 +327,8 @@ def integration():
             check(fresh != token, "Token rotation issued new bearer secret")
             status, _, _ = get(sub_port, prefix + "clash")
             check(status == 404, "Old subscription URL revoked")
+            status, _, _ = https_get(tls_port, trust_root, prefix + "clash", "Clash-Verge")
+            check(status == 404, "Old URL also revoked through real TLS reverse proxy")
             status, body, _ = get(sub_port, "/" + fresh + "/clash")
             check(status == 200 and fresh.encode() in body and token.encode() not in body,
                   "New Clash provider correctly references rotated subscription token")
@@ -257,6 +347,15 @@ def integration():
             status, _, _ = get(sub_port, "/" + fresh + "/clash")
             check(status == 200, "Existing subscriptions survive failed publication")
         finally:
+            if nginx_proc:
+                nginx_proc.terminate()
+                try:
+                    nginx_proc.wait(timeout=7)
+                except subprocess.TimeoutExpired:
+                    nginx_proc.kill()
+                    nginx_proc.wait(timeout=5)
+                if nginx_proc.stderr:
+                    nginx_proc.stderr.close()
             if server:
                 server.terminate()
                 try:
