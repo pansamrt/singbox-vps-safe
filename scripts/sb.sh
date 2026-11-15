@@ -79,7 +79,6 @@ extensions_menu() {
         if [[ "$token" != DOWNLOAD ]]; then echo 'Cancelled'; continue; fi
         python3 "$ROOT/scripts/extensions.py" download "$tool" "$target"
         ;;
-      10) extensions_menu ;;
       0) return 0 ;;
       *) echo 'Invalid selection; no changes.' >&2 ;;
     esac
@@ -146,6 +145,7 @@ menu() {
         if [[ "$reply" != 'UPDATE' ]]; then echo 'Cancelled, no changes.'; continue; fi
         python3 "$ROOT/scripts/update.py" --update --confirm
         ;;
+      10) extensions_menu ;;
       0) return 0 ;;
       *) echo 'Invalid choice; no changes.' >&2 ;;
     esac
