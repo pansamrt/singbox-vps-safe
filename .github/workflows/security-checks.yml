@@ -29,7 +29,7 @@ jobs:
       - name: Python protocol-generator unit tests
         run: python3 -m unittest discover -s tests -v
       - name: Python syntax check
-        run: python3 -m py_compile scripts/generate_config.py scripts/state.py scripts/update.py
+        run: python3 -m py_compile scripts/generate_config.py scripts/state.py scripts/update.py scripts/combine_configs.py scripts/ports.py
       - name: Require explicit confirmation and prohibit scheduled upgrades
         run: |
           grep -Fq -- '--update requires --confirm' scripts/update.py
@@ -70,6 +70,11 @@ jobs:
             --reality-binary "$BIN" \
             --output "$RUNNER_TEMP/vless-reality.json"
           sudo "$BIN" check -c "$RUNNER_TEMP/vless-reality.json"
+          python3 scripts/combine_configs.py --output "$RUNNER_TEMP/combined.json" \
+            "$RUNNER_TEMP/vless-reality.json" "$RUNNER_TEMP/hysteria2.json" \
+            "$RUNNER_TEMP/tuic.json" "$RUNNER_TEMP/anytls.json"
+          sudo "$BIN" check -c "$RUNNER_TEMP/combined.json"
+          python3 scripts/ports.py --config "$RUNNER_TEMP/combined.json"
       - name: Verify source attribution exists
         run: |
           test -s LICENSE
