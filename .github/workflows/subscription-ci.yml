@@ -1,0 +1,37 @@
+name: fscarmen local subscription safety checks
+
+on:
+  push:
+    branches: ["refactor/**", "main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  source-and-subscription-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm fixed source attribution
+        run: |
+          set -Eeuo pipefail
+          test -s LICENSE
+          test -s upstream/fscarmen/sing-box.sh
+          grep -Fq 'fscarmen/sing-box' README.md
+          grep -Fq '7a666fc870d027790b6b831d219d8d99f13a73a4' README.md
+          bash -n upstream/fscarmen/sing-box.sh
+          if grep -R -nE '(curl|wget).*\|[[:space:]]*(bash|sh)' scripts/; then
+            echo "No remote-code execution allowed in project-owned scripts"
+            exit 1
+          fi
+      - name: Python static syntax checks
+        run: python3 -m py_compile scripts/local_subscriptions.py
+      - name: Offline unit and loopback HTTP tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Verify no automatic deployment
+        run: |
+          if grep -R -n -E 'ssh .*@|scp .*@|systemctl (restart|stop) sing-box|iptables -F|ufw disable' scripts/; then
+            echo "Unexpected remote/deployment operation"
+            exit 1
+          fi
