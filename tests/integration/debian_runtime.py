@@ -174,6 +174,9 @@ http {{
     access_log off;
     proxy_temp_path /tmp/nginx-proxy;
     client_body_temp_path /tmp/nginx-client;
+    fastcgi_temp_path /tmp/nginx-fastcgi;
+    uwsgi_temp_path /tmp/nginx-uwsgi;
+    scgi_temp_path /tmp/nginx-scgi;
     server {{
         listen 127.0.0.1:{https_port} ssl;
         server_name {hostname};
