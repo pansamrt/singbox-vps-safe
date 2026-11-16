@@ -124,7 +124,9 @@ class StateTests(unittest.TestCase):
         self.assertEqual((source / "tls" / "tls-0.key").stat().st_mode & 0o077, 0)
         key.write_bytes(b"changed-key")
         with patch.object(state.grp, "getgrnam", return_value=SimpleNamespace(gr_gid=os.getgid())):
-            state.restore_snapshot(self.layout, self.ctl, snap)
+            with patch.object(state.os, "chown") as fake_chown:
+                state.restore_snapshot(self.layout, self.ctl, snap)
+                self.assertTrue(fake_chown.called)
         self.assertEqual(key.read_bytes(), b"original-test-key")
         self.assertEqual(key.stat().st_mode & 0o777, 0o640)
 
