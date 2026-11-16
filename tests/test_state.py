@@ -5,6 +5,8 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import state
@@ -62,7 +64,7 @@ class StateTests(unittest.TestCase):
         sid = state.create_snapshot(self.layout, self.ctl)
         src, manifest = state.load_snapshot(self.layout, sid)
         self.assertTrue(manifest["active"])
-        self.assertEqual(manifest["schema"], 1)
+        self.assertEqual(manifest["schema"], 2)
         for name in state.EXPECTED_NAMES:
             self.assertEqual((src / name).read_bytes(), name.encode() + b"-VERSION-ONE")
             self.assertEqual((src / name).stat().st_mode & 0o077, 0)
@@ -106,6 +108,48 @@ class StateTests(unittest.TestCase):
             state.restore_snapshot(self.layout, self.ctl, sid)
         self.assertTrue(self.layout.unit.is_symlink())
         self.assertTrue(self.ctl.active)
+
+    def test_tls_snapshot_restore_and_permissions(self):
+        folder = self.layout.config.parent / "managed-tls"
+        folder.mkdir(mode=0o750)
+        key = folder / "tls-0.key"
+        cert = folder / "tls-0.crt"
+        key.write_bytes(b"original-test-key")
+        cert.write_bytes(b"original-test-cert")
+        key.chmod(0o640)
+        cert.chmod(0o640)
+        snap = state.create_snapshot(self.layout, self.ctl)
+        source, manifest = state.load_snapshot(self.layout, snap)
+        self.assertEqual(set(manifest["tls"]), {"tls-0.key", "tls-0.crt"})
+        self.assertEqual((source / "tls" / "tls-0.key").stat().st_mode & 0o077, 0)
+        key.write_bytes(b"changed-key")
+        with patch.object(state.grp, "getgrnam", return_value=SimpleNamespace(gr_gid=os.getgid())):
+            state.restore_snapshot(self.layout, self.ctl, snap)
+        self.assertEqual(key.read_bytes(), b"original-test-key")
+        self.assertEqual(key.stat().st_mode & 0o777, 0o640)
+
+    def test_tampered_tls_snapshot_refused_before_stopping_service(self):
+        folder = self.layout.config.parent / "managed-tls"
+        folder.mkdir(mode=0o750)
+        key = folder / "tls-0.key"
+        key.write_bytes(b"original-key")
+        key.chmod(0o640)
+        snap = state.create_snapshot(self.layout, self.ctl)
+        (self.layout.state / "snapshots" / snap / "tls" / "tls-0.key").write_bytes(b"tampered")
+        with self.assertRaises(ValueError):
+            state.restore_snapshot(self.layout, self.ctl, snap)
+        self.assertNotIn("stop", self.ctl.events)
+
+    def test_refuse_unknown_tls_file_or_symlink(self):
+        folder = self.layout.config.parent / "managed-tls"
+        folder.mkdir(mode=0o750)
+        (folder / "other.key").write_bytes(b"unknown")
+        with self.assertRaisesRegex(RuntimeError, "Unexpected file"):
+            state.create_snapshot(self.layout, self.ctl)
+        (folder / "other.key").unlink()
+        (folder / "tls-0.key").symlink_to(self.layout.config)
+        with self.assertRaises(RuntimeError):
+            state.create_snapshot(self.layout, self.ctl)
 
     def test_snapshot_path_traversal_refused(self):
         with self.assertRaises(ValueError):
