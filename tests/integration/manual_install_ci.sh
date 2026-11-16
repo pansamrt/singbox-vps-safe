@@ -5,8 +5,8 @@ set -Eeuo pipefail
 umask 077
 [[ -f /fixture/core.tgz && -f /work/scripts/install.sh ]] || exit 2
 [[ "$(uname -m)" == x86_64 ]] || exit 2
-mkdir -p /tmp/mockbin /tmp/mockctl
-cat > /tmp/mockbin/curl <<'MOCKCURL'
+mkdir -p /var/tmp/mockbin /tmp/mockctl
+cat > /var/tmp/mockbin/curl <<'MOCKCURL'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 expected='https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz'
@@ -23,7 +23,7 @@ done
 [[ "$url" == "$expected" && "$dest" == /* ]] || exit 1
 cp /fixture/core.tgz "$dest"
 MOCKCURL
-cat > /tmp/mockbin/systemctl <<'MOCKSYSTEMCTL'
+cat > /var/tmp/mockbin/systemctl <<'MOCKSYSTEMCTL'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 operation="$1"
@@ -59,8 +59,8 @@ fi
 echo "Unexpected systemctl operation: $*" >&2
 exit 45
 MOCKSYSTEMCTL
-chmod 755 /tmp/mockbin/*
-export PATH="/tmp/mockbin:$PATH"
+chmod 755 /var/tmp/mockbin/*
+export PATH="/var/tmp/mockbin:$PATH"
 export SAFE_OFFLINE_ARCHIVE=/fixture/core.tgz
 cd /work
 cp /etc/resolv.conf /tmp/original-resolv.conf
