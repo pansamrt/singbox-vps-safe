@@ -1,0 +1,50 @@
+name: Disposable Debian owner-installer lifecycle
+
+on:
+  pull_request:
+  push:
+    branches: ["feature/**", "main"]
+
+permissions:
+  contents: read
+
+jobs:
+  manual-install-lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        debian: ["12", "13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download official core and verify pinned SHA256 outside container
+        run: |
+          set -Eeuo pipefail
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 2 --max-time 120 \
+            "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz" \
+            -o "$RUNNER_TEMP/core.tgz"
+          printf '%s  %s\n' \
+            '699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968' \
+            "$RUNNER_TEMP/core.tgz" | sha256sum -c -
+      - name: Build Debian container without host credentials
+        run: |
+          docker build --pull --build-arg "DEBIAN_RELEASE=${{ matrix.debian }}" \
+            -f tests/integration/manual-install.Dockerfile \
+            -t "singbox-owner-ci:debian-${{ matrix.debian }}" .
+      - name: Execute full disposable owner-install/snapshot/uninstall/failure test
+        run: |
+          docker run --rm \
+            --network none \
+            --cap-drop ALL \
+            --cap-add CHOWN --cap-add FOWNER --cap-add SETUID --cap-add SETGID \
+            --security-opt no-new-privileges \
+            --pids-limit 120 --memory 1g --cpus 2 \
+            --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=128m \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/work,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/core.tgz,dst=/fixture/core.tgz,readonly" \
+            --workdir /work \
+            "singbox-owner-ci:debian-${{ matrix.debian }}" \
+            bash tests/integration/manual_install_ci.sh
