@@ -10,6 +10,7 @@ import fcntl
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import grp
 import json
 import os
 from pathlib import Path
@@ -22,7 +23,7 @@ import sys
 
 SNAPSHOT_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$")
 EXPECTED_NAMES = ("binary", "config", "unit")
-MODES = {"binary": 0o755, "config": 0o600, "unit": 0o644}
+MODES = {"binary": 0o755, "config": 0o640, "unit": 0o644}
 SERVICE = "singbox-vps-safe.service"
 
 
@@ -60,8 +61,8 @@ def assert_regular(path: Path, secret: bool = False) -> None:
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode):
         raise RuntimeError(f"Not a regular file (symlinks forbidden): {path}")
-    if secret and info.st_mode & 0o077:
-        raise RuntimeError(f"Secret file is group/world accessible: {path}")
+    if secret and (info.st_mode & 0o037):
+        raise RuntimeError(f"Secret file is world-accessible or group-writable/executable: {path}")
 
 
 def ensure_private_directory(path: Path) -> None:
@@ -210,7 +211,10 @@ def apply_files(layout: Layout, source: Path) -> None:
             if not target.parent.is_dir() or target.parent.is_symlink():
                 raise RuntimeError(f"Unexpected target directory: {target.parent}")
             tmp = target.with_name("." + target.name + ".restore-" + secrets.token_hex(8))
-            copied = copy_no_follow(source / name, tmp, MODES[name])
+            copy_no_follow(source / name, tmp, MODES[name])
+            if name == "config" and target == Path("/etc/singbox-vps-safe/config.json"):
+                # Preserve non-root service read access after rollback.
+                os.chown(tmp, 0, grp.getgrnam("singbox-safe").gr_gid)
             staged.append((tmp, target))
         for tmp, target in staged:
             os.replace(tmp, target)
