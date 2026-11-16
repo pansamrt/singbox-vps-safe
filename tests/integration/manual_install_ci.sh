@@ -68,7 +68,27 @@ echo "FAKE_SSH_REMAINS" > /tmp/ssh-sentinel
 
 bash scripts/install.sh --plan > /tmp/plan.log
 [[ ! -e /opt/singbox-vps-safe && ! -e /etc/systemd/system/singbox-vps-safe.service ]]
+# An IPv6-only bind to an unassigned documentation address MUST fail before
+# creating users, changing a service or writing installation files.
+if bash scripts/install.sh --install-reality 53579 www.example.org \
+  --network-mode ipv6 --listen 2001:db8::cafe >/tmp/ipv6-unassigned.log 2>&1; then
+  echo "ERROR: unassigned IPv6 address unexpectedly passed preflight" >&2
+  exit 1
+fi
+test ! -e /opt/singbox-vps-safe
+test ! -e /etc/systemd/system/singbox-vps-safe.service
+test ! -e /etc/singbox-vps-safe
+test ! -e /var/lib/singbox-vps-safe
+! getent passwd singbox-safe >/dev/null
+echo "PASS: unassigned IPv6 preflight fails before any system changes"
 bash scripts/install.sh --install-reality 53579 www.example.org
+python3 - <<'PY'
+import json
+with open("/etc/singbox-vps-safe/config.json", encoding="utf8") as f:
+    config = json.load(f)
+assert config["inbounds"][0]["listen"] == "::"
+print("PASS: default installed Reality configuration is dual-stack ::")
+PY
 test -x /opt/singbox-vps-safe/sing-box
 test -f /etc/systemd/system/singbox-vps-safe.service
 test -f /var/lib/singbox-vps-safe/client.json

@@ -17,7 +17,8 @@ The original upstream installation script is archived under `upstream/fscarmen` 
 - Fixed official sing-box 1.14.4 core (SHA256-verified for amd64/arm64).
 - First-install VLESS-Reality with local keypair generation, or user-reviewed
   JSON configurations for Hysteria2, TUIC and AnyTLS with manual TLS material.
-- IPv4/IPv6 and TCP/UDP socket preflight; config checks before system mutation.
+- Default IPv4 + IPv6 dual-stack inbound, explicit IPv4-only or concrete IPv6-only
+  modes, and both-family TCP/UDP port preflight before system mutation.
 - Private local client subscriptions for sing-box, V2RayN, Clash/Mihomo,
   Shadowrocket, plus independent revocable token and loopback-only HTTP server.
 - Root-only versioned snapshots, manual confirmed core-only upgrades with
@@ -54,6 +55,7 @@ must be installed by the owner beforehand.
 ~~~bash
 # 8443 is only an example. Use a free port and a suitable real handshake DNS host.
 sudo bash install.sh --install-reality 8443 www.example.org
+# Default: dual-stack (::) for IPv4 + IPv6, subject to VPS IPv6 support
 sudo bash install.sh --status
 sudo systemctl status singbox-vps-safe.service
 ~~~
@@ -61,6 +63,33 @@ sudo systemctl status singbox-vps-safe.service
 The service binds only the ports specified in your configuration. It never
 opens firewalls automatically. The example handshake domain must be replaced
 with one you understand and have verified.
+
+**Smart network modes (new installs, not in-place changes):**
+
+~~~bash
+# Default: IPv4 + IPv6 in one :: wildcard listener, both-family port checks
+sudo bash install.sh --install-reality 8443 www.example.org
+
+# IPv4-only wildcard
+sudo bash install.sh --install-reality 8443 www.example.org --network-mode ipv4
+
+# IPv6-only: requires your VPS's assigned concrete IPv6 address; :: is rejected
+sudo bash install.sh --install-reality 8443 www.example.org \
+  --network-mode ipv6 --listen 2001:db8::10
+~~~
+
+The IPv6 example uses a **documentation-only** address; replace it with an
+IPv6 address actually assigned to the test VPS. Smart does not allocate public
+IPv6 addresses, modify DNS AAAA records or open the host/provider firewall.
+Dual mode uses the single `::` inbound; a real IPv4 and IPv6 connection
+test must succeed for the VPS's kernel/network. The preflight verifies both
+TCP or UDP port families, but it cannot prove public Internet reachability.
+Only-IPv6 mode requires a concrete native address to avoid accepting
+IPv4-mapped clients on an IPv6 wildcard.
+
+For user-provided Hysteria2, TUIC or AnyTLS configurations, the generator
+defaults to dual-stack too. Use `--network-mode ipv4` or
+`--network-mode ipv6 --listen YOUR_ASSIGNED_IPV6` to override.
 
 Dedicated installed paths:
 
@@ -109,6 +138,10 @@ After a Reality first install:
 ~~~bash
 # Replace with the actual public IP or DNS hostname, without URL scheme:
 sudo bash install.sh --export-clients YOUR_VPS_PUBLIC_IP
+# Or export separate IPv4 and IPv6 endpoints from the same node credentials:
+sudo bash install.sh --export-clients \
+  --server-ipv4 YOUR_PUBLIC_IPV4 --server-ipv6 YOUR_PUBLIC_IPV6
+# For a DNS name with A and AAAA records, use --export-clients YOUR_DOMAIN instead.
 
 # This prints a private output directory; use THAT actual directory below.
 sudo bash install.sh --subscription-init
@@ -118,9 +151,32 @@ sudo bash install.sh --subscription-urls
 sudo bash install.sh --subscription-serve
 ~~~
 
+IPv6 link URIs are enclosed in brackets (for example,
+`vless://...@[2001:db8::10]:8443`), while sing-box and Clash JSON/YAML
+`server` fields contain an unbracketed literal. When both public IPs are
+supplied, each protocol appears as two separate client nodes; their keys
+are generated locally and **not** duplicated as extra server inbounds.
+
+Local subscription serving **also defaults to dual-stack loopback only**:
+`127.0.0.1:8787` and `[::1]:8787`. For a truly IPv6-only test VPS,
+initialize it with:
+
+~~~bash
+sudo bash install.sh --subscription-init --loopback-mode ipv6
+# The local-only URL then begins with http://[::1]:8787/PRIVATE_TOKEN/
+# Configure the owner-managed HTTPS reverse proxy to [::1]:8787.
+~~~
+
+You can also select `--loopback-mode ipv4` if the test VPS has IPv6
+disabled. These are **loopback** addresses, not Internet listeners; no
+firewall, web server, DNS or TLS certificate is automatically configured.
+If already initialized, changing loopback mode requires an owner-managed
+migration; token rotation does not change the stored listener mode.
+
 The directory suffix EXAMPLE is not literal; use the path printed by the
-exporter. All subscription credentials are saved privately. The default URL
-format is http://127.0.0.1:8787/PRIVATE_TOKEN/auto, which works only locally.
+exporter. All subscription credentials are saved privately. The default printed URL
+is http://127.0.0.1:8787/PRIVATE_TOKEN/auto (also accessible from ::1
+when loopback mode is dual), and works only locally.
 For access from other devices, you must **separately configure your own
 trusted HTTPS reverse proxy** pointing to 127.0.0.1:8787, then rotate the
 public base URL:
@@ -202,5 +258,5 @@ bash install.sh --extension-status
 **Do not confuse passed container tests with completed production acceptance.
 No Germany VPS or existing Hysteria2 instance was accessed or changed.**
 
-[SUBSCRIPTIONS.md](SUBSCRIPTIONS.md) · [UPSTREAM_AUDIT.md](UPSTREAM_AUDIT.md) ·
+[Smart IPv4/IPv6 guide](docs/IPV6.md) · [SUBSCRIPTIONS.md](SUBSCRIPTIONS.md) · [UPSTREAM_AUDIT.md](UPSTREAM_AUDIT.md) ·
 [GPL-3.0](LICENSE)

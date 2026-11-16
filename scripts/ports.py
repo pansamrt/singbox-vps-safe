@@ -80,8 +80,23 @@ def probe(binding: tuple[str, str, int]) -> None:
     ip = ipaddress.ip_address(listen)
     family = socket.AF_INET6 if ip.version == 6 else socket.AF_INET
     sock_type = socket.SOCK_STREAM if protocol == "TCP" else socket.SOCK_DGRAM
+    # An IPv6 wildcard is Smart's dual-stack mode, not IPv6-only.
+    # Check IPv4 separately so a v6-only host setting cannot hide an occupied
+    # IPv4 socket. Then demand an IPv6 wildcard socket with v4-mapped support.
+    if listen == "::":
+        with socket.socket(socket.AF_INET, sock_type) as v4:
+            v4.bind(("0.0.0.0", port))
+        with socket.socket(socket.AF_INET6, sock_type) as dual:
+            dual.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            if dual.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY) != 0:
+                raise OSError("IPv6 wildcard cannot accept IPv4-mapped connections")
+            dual.bind(("::", port))
+        return
     with socket.socket(family, sock_type) as sock:
-        # Do not set SO_REUSEPORT / SO_REUSEADDR: detect occupied ports conservatively.
+        # For concrete IPv6 addresses, assert IPv6-only transport binding.
+        if family == socket.AF_INET6:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        # Do not set SO_REUSEPORT / SO_REUSEADDR: conservative conflict check.
         sock.bind((listen, port))
 
 
@@ -94,7 +109,7 @@ def preflight(config: dict) -> list[tuple[str, str, int]]:
         except OSError as exc:
             raise ValueError(
                 f"Cannot bind {protocol} {listen}:{port} ({exc}); "
-                "port occupied, address unavailable, or insufficient privileges"
+                "IPv4/IPv6 port occupied, address unavailable, or insufficient privileges"
             ) from exc
     return desired
 
