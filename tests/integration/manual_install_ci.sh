@@ -144,7 +144,9 @@ runuser -u singbox-safe -- /opt/singbox-vps-safe/sing-box check \
 echo "PASS: Hysteria2 TLS installed and native-checked with nonroot readable copied key"
 bash scripts/uninstall.sh --uninstall --confirm
 test -f /etc/singbox-vps-safe/managed-tls/tls-0.key
-echo "PASS: scoped uninstall preserves certificate material, without deleting source"
+test "$(stat -c %a /etc/singbox-vps-safe/managed-tls/tls-0.key)" = 600
+test "$(stat -c %g /etc/singbox-vps-safe/managed-tls/tls-0.key)" = 0
+echo "PASS: scoped uninstall preserves certificates but revokes retired service-group access"
 # Purge only explicitly known CI-created fixtures inside disposable container.
 rm -rf /etc/singbox-vps-safe/managed-tls /var/lib/singbox-vps-safe
 rmdir /etc/singbox-vps-safe
