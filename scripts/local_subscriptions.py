@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Smart local subscription publisher. No external conversion or QR APIs.
 
-Only binds 127.0.0.1. Remote clients require an owner-configured HTTPS reverse
+Only binds IPv4/IPv6 loopback. Remote clients require an owner-configured HTTPS reverse
 proxy. No firewall, SSH, nginx, services, or sing-box settings are modified.
 """
 from __future__ import annotations
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import fcntl
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,6 +16,8 @@ import os
 from pathlib import Path
 import re
 import secrets
+import socket
+import threading
 import shutil
 import stat
 import sys
@@ -110,7 +112,7 @@ def valid_base(value: str | None, port: int):
     # Accessing .port deliberately validates port syntax.
     if p.port is not None and not 1 <= p.port <= 65535:
         raise ValueError("Invalid URL port")
-    if p.scheme == "http" and p.hostname in ("127.0.0.1", "localhost"):
+    if p.scheme == "http" and p.hostname in ("127.0.0.1", "localhost", "::1"):
         if p.port != port:
             raise ValueError("Loopback URL must match local listen port")
     elif p.scheme != "https" or p.hostname in ("localhost", "127.0.0.1", "::1"):
@@ -128,20 +130,28 @@ def settings(root: Path):
         raise ValueError("Invalid port")
     if data.get("base") != valid_base(data.get("base"), port):
         raise ValueError("Invalid URL")
+    if data.get("loopback_mode", "ipv4") not in ("ipv4", "ipv6", "dual"):
+        raise ValueError("Invalid local subscription loopback mode")
     gen = data.get("generation")
     if gen is not None and (not isinstance(gen, str) or not GEN_RE.fullmatch(gen)):
         raise ValueError("Invalid generation")
     return data
 
 
-def init(root: Path, port: int, public_url: str | None):
+def init(root: Path, port: int, public_url: str | None,
+         loopback_mode: str = "dual"):
+    if loopback_mode not in ("ipv4", "ipv6", "dual"):
+        raise ValueError("Invalid loopback mode")
+    local_url = ("http://[::1]:" + str(port)) if loopback_mode == "ipv6" else None
+    chosen_base = public_url if public_url is not None else local_url
+    checked_base = valid_base(chosen_base, port)
     state_dir(root, create=True)
     cfg = root / "access.json"
     if cfg.exists() or cfg.is_symlink():
         raise ValueError("Already initialized: use rotate")
     atomic_json(cfg, {"schema": 1, "token": secrets.token_urlsafe(36),
-                      "port": port, "base": valid_base(public_url, port),
-                      "generation": None})
+                      "port": port, "base": checked_base,
+                      "loopback_mode": loopback_mode, "generation": None})
 
 
 def rotate(root: Path, public_url: str | None = None):
@@ -312,12 +322,51 @@ def urls(root: Path):
         print("Loopback addresses work only on the VPS. For remote clients use your own HTTPS reverse proxy.")
 
 
+class IPv6LoopbackServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        super().server_bind()
+
+
+def serve_loopbacks(root: Path):
+    record = settings(root)
+    port = record["port"]
+    mode = record.get("loopback_mode", "ipv4")
+    handler = type("BoundHandler", (Handler,), {"root": root})
+    with ExitStack() as stack:
+        servers = []
+        if mode in ("ipv4", "dual"):
+            servers.append(stack.enter_context(ThreadingHTTPServer(("127.0.0.1", port), handler)))
+        if mode in ("ipv6", "dual"):
+            servers.append(stack.enter_context(IPv6LoopbackServer(("::1", port), handler)))
+        for server in servers:
+            server.daemon_threads = True
+        workers = []
+        for server in servers[:-1]:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            workers.append((server, thread))
+        print("Local subscription service only on: " +
+              ", ".join(("127.0.0.1" if srv.address_family == socket.AF_INET else "::1")
+                        + ":" + str(port) for srv in servers), flush=True)
+        try:
+            servers[-1].serve_forever()
+        finally:
+            for server, thread in workers:
+                server.shutdown()
+                thread.join(timeout=5)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--state-dir", type=Path, default=ROOT)
     sub = p.add_subparsers(dest="action", required=True)
     init_cmd = sub.add_parser("init")
     init_cmd.add_argument("--port", type=int, default=8787)
+    init_cmd.add_argument("--loopback-mode", choices=["dual", "ipv4", "ipv6"], default="dual",
+                          help="dual loopback default, or one IP family only")
     init_cmd.add_argument("--public-base-url")
     pub = sub.add_parser("publish")
     pub.add_argument("--source-dir", type=Path, default=SOURCE)
@@ -330,7 +379,7 @@ def main(argv=None):
     try:
         if args.action == "init":
             with exclusive_writer(args.state_dir):
-                init(args.state_dir, args.port, args.public_base_url)
+                init(args.state_dir, args.port, args.public_base_url, args.loopback_mode)
             print("Initialized. Run 'urls' privately to view subscription addresses.")
         elif args.action == "publish":
             with exclusive_writer(args.state_dir):
@@ -343,12 +392,7 @@ def main(argv=None):
         elif args.action == "urls":
             urls(args.state_dir)
         else:
-            cfg = settings(args.state_dir)
-            handler = type("BoundHandler", (Handler,), {"root": args.state_dir})
-            with ThreadingHTTPServer(("127.0.0.1", cfg["port"]), handler) as server:
-                server.daemon_threads = True
-                print("Local-only subscription server: http://127.0.0.1:" + str(cfg["port"]))
-                server.serve_forever()
+            serve_loopbacks(args.state_dir)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print("ERROR:", exc, file=sys.stderr)
         return 1
