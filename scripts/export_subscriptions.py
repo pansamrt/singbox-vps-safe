@@ -130,11 +130,23 @@ def clash_proxy(c: dict, server: str, index: int) -> dict | None:
     return None
 
 
-def build_outputs(clients: list[dict], server: str) -> dict[str, bytes]:
-    host, url_host = host_validate(server)
-    outs = [outbound(c, host, i + 1) for i, c in enumerate(clients)]
-    links = [share_url(c, url_host, i + 1) for i, c in enumerate(clients)]
-    proxies = [p for i, c in enumerate(clients) if (p := clash_proxy(c, host, i + 1))]
+def build_outputs(clients: list[dict], server: str,
+                  secondary_server: str | None = None) -> dict[str, bytes]:
+    # DNS can resolve both A and AAAA. If two literal public addresses are
+    # supplied, publish two distinct nodes per protocol without changing keys.
+    addresses = [host_validate(server)]
+    if secondary_server is not None:
+        other = host_validate(secondary_server)
+        if other[0] == addresses[0][0]:
+            raise ValueError("IPv4/IPv6 subscription endpoints must be distinct")
+        addresses.append(other)
+    entries = [(c, host, url_host) for c in clients for host, url_host in addresses]
+    if len(entries) > 16:
+        raise ValueError("Subscription would exceed 16 endpoint entries")
+    outs = [outbound(c, host, i) for i, (c, host, _) in enumerate(entries, 1)]
+    links = [share_url(c, url_host, i) for i, (c, _, url_host) in enumerate(entries, 1)]
+    proxies = [p for i, (c, host, _) in enumerate(entries, 1)
+               if (p := clash_proxy(c, host, i))]
     singbox = {
         "log": {"level": "warn"},
         "outbounds": outs + [{"type": "direct", "tag": "direct"}],
@@ -182,12 +194,30 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--client-meta", type=Path,
                    default=Path("/var/lib/singbox-vps-safe/client.json"))
-    p.add_argument("--server", required=True, help="public host or IP of your VPS (no scheme)")
+    p.add_argument("--server", help="public DNS name (A+AAAA) or one IP, no URL scheme")
+    p.add_argument("--server-ipv4", help="IPv4 VPS address for a separate IPv4 subscription node")
+    p.add_argument("--server-ipv6", help="IPv6 VPS address for a separate IPv6 subscription node")
     p.add_argument("--output-parent", type=Path, default=Path("/var/lib/singbox-vps-safe"))
     args = p.parse_args(argv)
     os.umask(0o077)
     try:
-        outputs = build_outputs(read_private_meta(args.client_meta), args.server)
+        if args.server and (args.server_ipv4 or args.server_ipv6):
+            raise ValueError("Choose --server OR --server-ipv4/--server-ipv6, not both")
+        if args.server:
+            primary, secondary = args.server, None
+        else:
+            if not (args.server_ipv4 or args.server_ipv6):
+                raise ValueError("Provide --server or at least one IP family address")
+            if args.server_ipv4:
+                if ipaddress.ip_address(args.server_ipv4).version != 4:
+                    raise ValueError("--server-ipv4 must be an IPv4 literal")
+            if args.server_ipv6:
+                v6 = ipaddress.ip_address(args.server_ipv6)
+                if v6.version != 6 or v6.ipv4_mapped is not None or "%" in args.server_ipv6:
+                    raise ValueError("--server-ipv6 must be a plain native IPv6 literal")
+            primary = args.server_ipv4 or args.server_ipv6
+            secondary = args.server_ipv6 if args.server_ipv4 else None
+        outputs = build_outputs(read_private_meta(args.client_meta), primary, secondary)
         result = write_outputs(args.output_parent, outputs)
         print("Private subscription source directory:", result)
         print("Formats:", ", ".join(sorted(outputs)))
