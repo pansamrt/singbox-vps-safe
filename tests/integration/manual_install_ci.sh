@@ -120,8 +120,36 @@ test -f /tmp/ssh-sentinel
 cmp /etc/resolv.conf /tmp/original-resolv.conf
 echo "PASS: scoped uninstall preserves private records and untouched DNS"
 
-# After complete uninstall, discard test-only state (isolated Docker container).
+# Exercise real Hysteria2 TLS initial install with pre-existing manually supplied
+# certificate/key. All operations are inside this disposable Docker overlay.
 rm -rf /var/lib/singbox-vps-safe
+mkdir -p /var/tmp/test-tls
+openssl req -new -x509 -days 1 -nodes -newkey rsa:2048 \
+  -subj '/CN=vpn.example.org' \
+  -keyout /var/tmp/test-tls/private.key \
+  -out /var/tmp/test-tls/cert.pem >/dev/null 2>&1
+chmod 600 /var/tmp/test-tls/private.key
+python3 scripts/generate_config.py --protocol hysteria2 --port 53580 \
+  --server-name vpn.example.org \
+  --tls-cert /var/tmp/test-tls/cert.pem \
+  --tls-key /var/tmp/test-tls/private.key \
+  --output /var/tmp/test-tls/hy2.json
+bash scripts/install.sh --install /var/tmp/test-tls/hy2.json
+test -f /etc/singbox-vps-safe/managed-tls/tls-0.key
+test "$(stat -c %a /etc/singbox-vps-safe/managed-tls/tls-0.key)" = 640
+test "$(stat -c %a /var/tmp/test-tls/private.key)" = 600
+grep -Fq '/etc/singbox-vps-safe/managed-tls/tls-0.key' /etc/singbox-vps-safe/config.json
+runuser -u singbox-safe -- /opt/singbox-vps-safe/sing-box check \
+  -c /etc/singbox-vps-safe/config.json
+echo "PASS: Hysteria2 TLS installed and native-checked with nonroot readable copied key"
+bash scripts/uninstall.sh --uninstall --confirm
+test -f /etc/singbox-vps-safe/managed-tls/tls-0.key
+echo "PASS: scoped uninstall preserves certificate material, without deleting source"
+# Purge only explicitly known CI-created fixtures inside disposable container.
+rm -rf /etc/singbox-vps-safe/managed-tls /var/lib/singbox-vps-safe
+rmdir /etc/singbox-vps-safe
+
+# Simulate systemd startup failure on a fresh isolated installation.
 touch /tmp/mockctl/fail-start
 if bash scripts/install.sh --install-reality 53578 www.example.org; then
   echo "FAIL: expected simulated systemd startup failure" >&2
