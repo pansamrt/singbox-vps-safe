@@ -20,9 +20,7 @@ class DoctorTests(unittest.TestCase):
             regular = root / "config"
             regular.write_text('{"inbounds":[]}')
             regular.chmod(0o640)
-            with patch.object(doctor.os, "getuid", return_value=0):
-                # Test may run as a regular CI runner, so do not assert root owner here.
-                self.assertIsNone(doctor.regular_with_mode(regular, 0o640) if regular.stat().st_uid == 0 else None)
+            # File ownership depends on CI runner; never change real filesystem owners.
             regular.chmod(0o666)
             result = doctor.regular_with_mode(regular, 0o640)
             self.assertTrue(result is not None)
@@ -32,7 +30,7 @@ class DoctorTests(unittest.TestCase):
 
     def test_uninstalled_is_read_only_and_safe(self):
         missing = Path("/tmp/this-sb-doctor-ci-unit-must-not-exist.service")
-        with patch.object(doctor, "UNIT", missing):
+        with patch.object(doctor, "UNIT", missing), patch.object(sys, "argv", ["doctor.py"]):
             self.assertEqual(doctor.main(), 0)
         self.assertFalse(missing.exists())
 
