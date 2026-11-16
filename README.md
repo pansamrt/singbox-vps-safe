@@ -258,5 +258,5 @@ bash install.sh --extension-status
 **Do not confuse passed container tests with completed production acceptance.
 No Germany VPS or existing Hysteria2 instance was accessed or changed.**
 
-[SUBSCRIPTIONS.md](SUBSCRIPTIONS.md) · [UPSTREAM_AUDIT.md](UPSTREAM_AUDIT.md) ·
+[Smart IPv4/IPv6 guide](docs/IPV6.md) · [SUBSCRIPTIONS.md](SUBSCRIPTIONS.md) · [UPSTREAM_AUDIT.md](UPSTREAM_AUDIT.md) ·
 [GPL-3.0](LICENSE)
