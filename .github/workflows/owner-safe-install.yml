@@ -21,6 +21,11 @@ jobs:
           set -Eeuo pipefail
           bash -n install.sh scripts/install.sh scripts/uninstall.sh scripts/sb.sh
           python3 -m py_compile scripts/*.py
+      - name: ShellCheck error-level audit of owner entrypoints
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck --severity=error install.sh scripts/install.sh scripts/uninstall.sh scripts/sb.sh
       - name: Read-only installer plan
         run: |
           bash install.sh --help
