@@ -1,4 +1,4 @@
-name: fscarmen local subscription safety checks
+name: Smart local subscription safety checks
 
 on:
   push:
