@@ -27,6 +27,13 @@ cleanup() {
     say "Install failed, recovering dedicated files only."
     systemctl disable --now "$SERVICE" >/dev/null 2>&1 || true
     rm -f -- "$UNIT" "$CONFIG" "$TARGET/sing-box"
+    if [[ -n "$WORK" && -d "$WORK/managed-tls" ]]; then
+      for staged in "$WORK"/managed-tls/*; do
+        [[ -f "$staged" ]] || continue
+        rm -f -- "$CONF_DIR/managed-tls/$(basename "$staged")"
+      done
+      rmdir "$CONF_DIR/managed-tls" >/dev/null 2>&1 || true
+    fi
     if [[ "$ACTION" == --install-reality ]]; then
       rm -f -- "$STATE/client.json"
     fi
@@ -89,6 +96,8 @@ if [[ -e "$CONF_DIR" ]]; then
   [[ -d "$CONF_DIR" && "$(stat -c %u "$CONF_DIR")" == 0 ]] ||
     die "Pre-existing TLS config directory must be root-owned"
 fi
+[[ ! -e "$CONF_DIR/managed-tls" && ! -L "$CONF_DIR/managed-tls" ]] ||
+  die "Refusing pre-existing managed TLS directory"
 if getent passwd "$USER_NAME" >/dev/null; then die "Dedicated user exists, refusing reuse"; fi
 
 WORK="$(mktemp -d /var/tmp/singbox-vps-safe.XXXXXXXX)"
@@ -119,6 +128,8 @@ if [[ "$ACTION" == --install-reality ]]; then
 fi
 python3 "$SOURCE_DIR/ports.py" --config "$SOURCE" || die "TCP/UDP port preflight refused"
 "$WORK/sing-box" check -c "$SOURCE" || die "Config check failed before any system changes"
+python3 "$SOURCE_DIR/prepare_tls.py" --config "$SOURCE" --workspace "$WORK" ||
+  die "Could not securely stage explicit TLS certificates"
 say "Preflight passed. Creating only dedicated resources."
 MUTATED=1
 useradd --system --user-group --no-create-home --home-dir /nonexistent \
@@ -128,7 +139,15 @@ install -d -o root -g root -m 755 "$TARGET"
 install -d -o root -g "$USER_NAME" -m 750 "$CONF_DIR"
 install -d -o root -g root -m 700 "$STATE"
 install -m 755 "$WORK/sing-box" "$TARGET/sing-box"
-install -m 640 -o root -g "$USER_NAME" "$SOURCE" "$CONFIG"
+if [[ -d "$WORK/managed-tls" ]]; then
+  install -d -o root -g "$USER_NAME" -m 750 "$CONF_DIR/managed-tls"
+  for staged in "$WORK"/managed-tls/*; do
+    [[ -f "$staged" ]] || continue
+    install -m 640 -o root -g "$USER_NAME" "$staged" "$CONF_DIR/managed-tls/$(basename "$staged")"
+  done
+fi
+install -m 640 -o root -g "$USER_NAME" "$WORK/install-config.json" "$CONFIG"
+"$TARGET/sing-box" check -c "$CONFIG" || die "Installed TLS/config check failed"
 if [[ "$ACTION" == --install-reality ]]; then
   install -m 600 -o root -g root "$WORK/generated.json.client.json" "$STATE/client.json"
 fi
