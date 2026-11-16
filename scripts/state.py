@@ -20,6 +20,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 
 SNAPSHOT_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$")
 EXPECTED_NAMES = ("binary", "config", "unit")
@@ -291,10 +292,40 @@ def apply_files(layout: Layout, source: Path) -> None:
             tmp.unlink(missing_ok=True)
 
 
+def validate_snapshot_config(layout: Layout, ctl: Systemd, source: Path, manifest: dict) -> None:
+    """Check an archived config against archived TLS, not potentially changed live keys."""
+    tls_files = manifest["tls"]
+    if not tls_files:
+        ctl.check_config(source / "binary", source / "config")
+        return
+    data = json.loads((source / "config").read_text(encoding="utf8"))
+    if not isinstance(data, dict) or not isinstance(data.get("inbounds"), list):
+        raise ValueError("Archived configuration is invalid")
+    prefix = str(layout.config.parent / "managed-tls") + "/"
+    for inbound in data["inbounds"]:
+        if not isinstance(inbound, dict):
+            raise ValueError("Malformed archived inbound")
+        tls = inbound.get("tls")
+        if not isinstance(tls, dict):
+            continue
+        for key in ("certificate_path", "key_path"):
+            value = tls.get(key)
+            if isinstance(value, str) and value.startswith(prefix):
+                filename = value[len(prefix):]
+                if filename not in tls_files:
+                    raise ValueError("Backup does not contain referenced TLS material")
+                tls[key] = str(source / "tls" / filename)
+    with tempfile.TemporaryDirectory(prefix="snapshot-check-", dir=layout.state) as tmp:
+        checked = Path(tmp) / "config.json"
+        checked.write_text(json.dumps(data), encoding="utf8")
+        checked.chmod(0o600)
+        ctl.check_config(source / "binary", checked)
+
+
 def restore_snapshot(layout: Layout, ctl: Systemd, snap_id: str) -> str:
     source, manifest = load_snapshot(layout, snap_id)
-    # Validate BEFORE touching the running service.
-    ctl.check_config(source / "binary", source / "config")
+    # Validate against saved certificates BEFORE stopping the service.
+    validate_snapshot_config(layout, ctl, source, manifest)
     # A reversible pre-restore point is required and must complete first.
     old_id = create_snapshot(layout, ctl, reason="before-restore-" + snap_id)
     old_source, old_manifest = load_snapshot(layout, old_id)
@@ -302,6 +333,8 @@ def restore_snapshot(layout: Layout, ctl: Systemd, snap_id: str) -> str:
         if ctl.is_active():
             ctl.stop()
         apply_files(layout, source)
+        # Re-validate installed files and restored TLS before startup.
+        ctl.check_config(layout.binary, layout.config)
         ctl.daemon_reload()
         if manifest["active"]:
             ctl.start()
