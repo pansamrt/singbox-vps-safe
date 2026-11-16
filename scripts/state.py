@@ -20,9 +20,11 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 
 SNAPSHOT_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}$")
 EXPECTED_NAMES = ("binary", "config", "unit")
+TLS_NAME_RE = re.compile(r"^tls-[0-7]\.(?:crt|key)$")
 MODES = {"binary": 0o755, "config": 0o640, "unit": 0o644}
 SERVICE = "singbox-vps-safe.service"
 
@@ -115,6 +117,26 @@ def hash_regular(path: Path) -> str:
     return digest.hexdigest()
 
 
+def tls_sources(layout: Layout) -> dict[str, Path]:
+    """Only dedicated TLS artifacts are backed up; refuse unexpected names/types."""
+    folder = layout.config.parent / "managed-tls"
+    if not folder.exists() and not folder.is_symlink():
+        return {}
+    if folder.is_symlink() or not folder.is_dir():
+        raise RuntimeError("Unsafe managed TLS directory")
+    if folder.stat().st_mode & 0o027:
+        raise RuntimeError("Managed TLS directory is group writable or publicly accessible")
+    entries = {}
+    for file in folder.iterdir():
+        if not TLS_NAME_RE.fullmatch(file.name):
+            raise RuntimeError("Unexpected file in managed TLS directory: " + file.name)
+        assert_regular(file, secret=True)
+        entries[file.name] = file
+    if len(entries) > 16:
+        raise RuntimeError("Too many managed TLS files")
+    return entries
+
+
 def snapshot_root(layout: Layout) -> Path:
     ensure_private_directory(layout.state)
     root = layout.state / "snapshots"
@@ -159,8 +181,15 @@ def create_snapshot(layout: Layout, ctl: Systemd, reason: str = "manual") -> str
         for name, source in paths.items():
             digest = copy_no_follow(source, stage / name, 0o700 if name == "binary" else 0o600)
             files[name] = {"sha256": digest, "mode": MODES[name]}
-        manifest = {"schema": 1, "id": snap_id, "reason": reason,
-                    "active": ctl.is_active(), "files": files}
+        tls_files = {}
+        tls_entries = tls_sources(layout)
+        if tls_entries:
+            (stage / "tls").mkdir(mode=0o700)
+        for name, path in sorted(tls_entries.items()):
+            digest = copy_no_follow(path, stage / "tls" / name, 0o600)
+            tls_files[name] = {"sha256": digest}
+        manifest = {"schema": 2, "id": snap_id, "reason": reason,
+                    "active": ctl.is_active(), "files": files, "tls": tls_files}
         manifest_path = stage / "manifest.json"
         manifest_path.write_text(json.dumps(manifest, sort_keys=True) + "\n", encoding="utf-8")
         manifest_path.chmod(0o600)
@@ -180,7 +209,7 @@ def load_snapshot(layout: Layout, snap_id: str) -> tuple[Path, dict]:
         raise ValueError("Snapshot does not exist or is a symlink")
     assert_regular(source / "manifest.json", secret=True)
     manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
-    if manifest.get("schema") != 1 or manifest.get("id") != snap_id:
+    if manifest.get("schema") != 2 or manifest.get("id") != snap_id:
         raise ValueError("Invalid snapshot manifest")
     if type(manifest.get("active")) is not bool:
         raise ValueError("Invalid service state")
@@ -195,6 +224,19 @@ def load_snapshot(layout: Layout, snap_id: str) -> tuple[Path, dict]:
             raise ValueError("Invalid file digest")
         if hash_regular(source / name) != item["sha256"]:
             raise ValueError(f"Snapshot corruption detected for {name}")
+    tls_files = manifest.get("tls")
+    if not isinstance(tls_files, dict) or len(tls_files) > 16:
+        raise ValueError("Invalid managed TLS manifest")
+    for name, metadata in tls_files.items():
+        if not TLS_NAME_RE.fullmatch(name) or not isinstance(metadata, dict):
+            raise ValueError("Invalid managed TLS entry")
+        digest = metadata.get("sha256")
+        if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+            raise ValueError("Invalid managed TLS digest")
+        if hash_regular(source / "tls" / name) != digest:
+            raise ValueError("Managed TLS corruption detected: " + name)
+    if tls_files and ((source / "tls").is_symlink() or not (source / "tls").is_dir()):
+        raise ValueError("Managed TLS snapshot folder is invalid")
     return source, manifest
 
 
@@ -203,6 +245,33 @@ def apply_files(layout: Layout, source: Path) -> None:
     paths = layout.paths()
     staged: list[tuple[Path, Path]] = []
     try:
+        # Apply restored TLS before installing the config that references it.
+        tls_saved = source / "tls"
+        if tls_saved.exists() or tls_saved.is_symlink():
+            if tls_saved.is_symlink() or not tls_saved.is_dir():
+                raise RuntimeError("Unsafe saved TLS folder")
+            dest_dir = layout.config.parent / "managed-tls"
+            if dest_dir.is_symlink():
+                raise RuntimeError("Refusing managed TLS destination symlink")
+            group_id = grp.getgrnam("singbox-safe").gr_gid
+            if not dest_dir.exists():
+                dest_dir.mkdir(mode=0o750)
+                os.chown(dest_dir, 0, group_id)
+            if not dest_dir.is_dir() or dest_dir.is_symlink():
+                raise RuntimeError("Unexpected managed TLS destination directory")
+            if dest_dir.stat().st_mode & 0o027:
+                raise RuntimeError("Unsafe managed TLS directory permissions")
+            for saved in sorted(tls_saved.iterdir()):
+                if not TLS_NAME_RE.fullmatch(saved.name):
+                    raise RuntimeError("Unexpected saved TLS file")
+                assert_regular(saved, secret=True)
+                dest = dest_dir / saved.name
+                if dest.exists() or dest.is_symlink():
+                    assert_regular(dest, secret=True)
+                tmp = dest.with_name("." + dest.name + ".restore-" + secrets.token_hex(8))
+                copy_no_follow(saved, tmp, 0o640)
+                os.chown(tmp, 0, group_id)
+                staged.append((tmp, dest))
         for name, target in paths.items():
             if target.is_symlink():
                 raise RuntimeError(f"Refusing target symlink: {target}")
@@ -223,10 +292,40 @@ def apply_files(layout: Layout, source: Path) -> None:
             tmp.unlink(missing_ok=True)
 
 
+def validate_snapshot_config(layout: Layout, ctl: Systemd, source: Path, manifest: dict) -> None:
+    """Check an archived config against archived TLS, not potentially changed live keys."""
+    tls_files = manifest["tls"]
+    if not tls_files:
+        ctl.check_config(source / "binary", source / "config")
+        return
+    data = json.loads((source / "config").read_text(encoding="utf8"))
+    if not isinstance(data, dict) or not isinstance(data.get("inbounds"), list):
+        raise ValueError("Archived configuration is invalid")
+    prefix = str(layout.config.parent / "managed-tls") + "/"
+    for inbound in data["inbounds"]:
+        if not isinstance(inbound, dict):
+            raise ValueError("Malformed archived inbound")
+        tls = inbound.get("tls")
+        if not isinstance(tls, dict):
+            continue
+        for key in ("certificate_path", "key_path"):
+            value = tls.get(key)
+            if isinstance(value, str) and value.startswith(prefix):
+                filename = value[len(prefix):]
+                if filename not in tls_files:
+                    raise ValueError("Backup does not contain referenced TLS material")
+                tls[key] = str(source / "tls" / filename)
+    with tempfile.TemporaryDirectory(prefix="snapshot-check-", dir=layout.state) as tmp:
+        checked = Path(tmp) / "config.json"
+        checked.write_text(json.dumps(data), encoding="utf8")
+        checked.chmod(0o600)
+        ctl.check_config(source / "binary", checked)
+
+
 def restore_snapshot(layout: Layout, ctl: Systemd, snap_id: str) -> str:
     source, manifest = load_snapshot(layout, snap_id)
-    # Validate BEFORE touching the running service.
-    ctl.check_config(source / "binary", source / "config")
+    # Validate against saved certificates BEFORE stopping the service.
+    validate_snapshot_config(layout, ctl, source, manifest)
     # A reversible pre-restore point is required and must complete first.
     old_id = create_snapshot(layout, ctl, reason="before-restore-" + snap_id)
     old_source, old_manifest = load_snapshot(layout, old_id)
@@ -234,6 +333,8 @@ def restore_snapshot(layout: Layout, ctl: Systemd, snap_id: str) -> str:
         if ctl.is_active():
             ctl.stop()
         apply_files(layout, source)
+        # Re-validate installed files and restored TLS before startup.
+        ctl.check_config(layout.binary, layout.config)
         ctl.daemon_reload()
         if manifest["active"]:
             ctl.start()

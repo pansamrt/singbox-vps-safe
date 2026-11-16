@@ -9,6 +9,7 @@ usage() {
 singbox-vps-safe owner-controlled management:
   bash scripts/sb.sh --menu
   bash scripts/sb.sh --plan
+  sudo bash scripts/sb.sh --doctor
   sudo bash scripts/sb.sh --install-reality PORT HANDSHAKE_DOMAIN
   sudo bash scripts/sb.sh --install /absolute/config.json
   bash scripts/sb.sh --generate --protocol vless-reality --port 8443 --handshake-host www.example.org --output ./server.json
@@ -108,9 +109,9 @@ menu() {
     echo '8) Export private client subscriptions'
     echo '9) Local subscription management'
     echo '10) Independent KejiLion / BBRv3 information (NO install)'
-    echo '11) Scoped uninstall (preserve backups)'
+    echo '11) Scoped uninstall (preserve backups)'\n    echo '12) Read-only installation integrity check'
     echo '0) Exit'
-    read -r -p 'Select [0-11]: ' selection || return 0
+    read -r -p 'Select [0-12]: ' selection || return 0
     case "$selection" in
       1) status ;;
       2) bash "$ROOT/scripts/install.sh" --plan ;;
@@ -152,6 +153,9 @@ menu() {
         [[ "$confirmation" == UNINSTALL ]] &&
           bash "$ROOT/scripts/uninstall.sh" --uninstall --confirm
         ;;
+      12)
+        require_root || continue
+        python3 "$ROOT/scripts/doctor.py" --strict ;;
       0) return 0 ;;
       *) echo 'Invalid choice' ;;
     esac
@@ -162,6 +166,7 @@ case "$MODE" in
   --help|-h) usage ;;
   --menu) menu ;;
   --status) status ;;
+  --doctor) require_root; python3 "$ROOT/scripts/doctor.py" --strict ;;
   --plan) bash "$ROOT/scripts/install.sh" --plan ;;
   --install-reality) require_root; bash "$ROOT/scripts/install.sh" --install-reality "$@" ;;
   --install) require_root; bash "$ROOT/scripts/install.sh" --install "$@" ;;

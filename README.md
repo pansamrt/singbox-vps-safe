@@ -135,6 +135,30 @@ set DNS, or create public connectivity. Disable reverse-proxy access logs
 for token-bearing paths. Never place subscription secrets in GitHub, logs,
 screenshots or third-party QR generator services.
 
+### Post-install integrity inspection (read-only)
+
+After the manual installation, run:
+
+~~~bash
+sudo bash install.sh --doctor
+~~~
+
+This checks root ownership, service account/group, private config and managed
+TLS file modes, required systemd isolation settings, and runs the installed
+native `sing-box check`. It does not print passwords or keys and never
+changes SSH, firewall, DNS, kernel, other proxy services or files.
+
+Versioned backups now include dedicated `managed-tls/tls-*.key` and
+`tls-*.crt` files (private SHA256-verified snapshot schema v2), rather than
+only program/config/systemd. Restoration checks archived TLS before stopping
+the service and revalidates installed files after the copy.
+
+**Compatibility notice:** backups created by the earlier schema-v1 implementation
+did not contain TLS private keys and are intentionally refused by the new
+restore routine. Preserve those older snapshots manually; create a fresh
+schema-v2 backup **after** upgrading this project. Do not assume old snapshots
+can reliably restore Hysteria2/TUIC/AnyTLS certificates.
+
 ### Updates, rollback, and exact-scope uninstall
 
 ~~~bash
