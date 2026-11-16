@@ -61,6 +61,7 @@ exit 45
 MOCKSYSTEMCTL
 chmod 755 /tmp/mockbin/*
 export PATH="/tmp/mockbin:$PATH"
+export SAFE_OFFLINE_ARCHIVE=/fixture/core.tgz
 cd /work
 cp /etc/resolv.conf /tmp/original-resolv.conf
 echo "FAKE_SSH_REMAINS" > /tmp/ssh-sentinel
