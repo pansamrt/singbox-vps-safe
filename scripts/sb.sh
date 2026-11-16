@@ -27,6 +27,10 @@ Smart | singbox-vps-safe — owner-controlled management:
   sudo bash scripts/sb.sh --subscription-serve
   bash scripts/sb.sh --extension-sources
   bash scripts/sb.sh --extension-status
+  sudo bash scripts/sb.sh --warp-status
+  sudo bash scripts/sb.sh --warp-plan --profile /root/private-warp.conf --inbound vless-reality-in --family ipv4
+  sudo bash scripts/sb.sh --warp-enable --profile /root/private-warp.conf --inbound vless-reality-in --family ipv6 --confirm
+  sudo bash scripts/sb.sh --warp-disable --confirm
   sudo bash scripts/sb.sh --uninstall --confirm
 
 Notes: no unattended installs, kernel edits, firewall/DNS/SSH changes,
@@ -63,6 +67,42 @@ extensions() {
     *) echo 'No action' ;;
   esac
 }
+warp_menu() {
+  echo 'Smart WARP is independent, OFF by default; no system routes change.'
+  echo '1) Read-only Smart WARP status'
+  echo '2) Verify private profile + config (no changes)'
+  echo '3) Enable selected proxy egress via WARP (snapshot + rollback)'
+  echo '4) Disable Smart WARP routing (snapshot + rollback)'
+  echo '0) Back'
+  local selection profile inbound family confirmation
+  read -r -p 'Select: ' selection || return 0
+  case "$selection" in
+    1) require_root && python3 "$ROOT/scripts/warp.py" status ;;
+    2|3)
+      require_root || return 1
+      read -r -p 'Absolute private WireGuard profile (0600): ' profile || return 0
+      read -r -p 'Exact existing Smart proxy inbound tag: ' inbound || return 0
+      read -r -p 'Destination family [ipv4/ipv6/dual]: ' family || return 0
+      case "$family" in ipv4|ipv6|dual) ;; *) echo 'Unsupported family'; return 1 ;; esac
+      if [[ "$selection" == 2 ]]; then
+        python3 "$ROOT/scripts/warp.py" plan --profile "$profile" --inbound "$inbound" --family "$family"
+      else
+        echo 'Only this inbound and selected destination IP family will use WARP.'
+        echo 'No VPS public IP allocation, default route, SSH or firewall changes.'
+        read -r -p 'Type ENABLE-WARP to proceed: ' confirmation || return 0
+        [[ "$confirmation" == ENABLE-WARP ]] &&
+          python3 "$ROOT/scripts/warp.py" enable --profile "$profile" --inbound "$inbound" --family "$family" --confirm
+      fi ;;
+    4)
+      require_root || return 1
+      read -r -p 'Type DISABLE-WARP to restore direct routing: ' confirmation || return 0
+      [[ "$confirmation" == DISABLE-WARP ]] &&
+        python3 "$ROOT/scripts/warp.py" disable --confirm ;;
+    0) ;;
+    *) echo 'No action' ;;
+  esac
+}
+
 subscriptions() {
   local n backend
   echo "1) Initialize private subscription token"
@@ -118,8 +158,9 @@ menu() {
     echo '9) Local subscription management'
     echo '10) Independent KejiLion / BBRv3 information (NO install)'
     echo '11) Scoped uninstall (preserve backups)'\n    echo '12) Read-only installation integrity check'
+    echo '13) Optional WARP IPv4/IPv6 proxy egress (OFF by default)'
     echo '0) Exit'
-    read -r -p 'Select [0-12]: ' selection || return 0
+    read -r -p 'Select [0-13]: ' selection || return 0
     case "$selection" in
       1) status ;;
       2) bash "$ROOT/scripts/install.sh" --plan ;;
@@ -183,6 +224,7 @@ menu() {
       12)
         require_root || continue
         python3 "$ROOT/scripts/doctor.py" --strict ;;
+      13) warp_menu ;;
       0) return 0 ;;
       *) echo 'Invalid choice' ;;
     esac
@@ -227,6 +269,10 @@ case "$MODE" in
   --subscription-serve) require_root; python3 "$ROOT/scripts/local_subscriptions.py" serve ;;
   --extension-sources) python3 "$ROOT/scripts/extensions.py" sources ;;
   --extension-status) python3 "$ROOT/scripts/extensions.py" status ;;
+  --warp-status) require_root; python3 "$ROOT/scripts/warp.py" status ;;
+  --warp-plan) require_root; python3 "$ROOT/scripts/warp.py" plan "$@" ;;
+  --warp-enable) require_root; python3 "$ROOT/scripts/warp.py" enable "$@" ;;
+  --warp-disable) require_root; python3 "$ROOT/scripts/warp.py" disable "$@" ;;
   --uninstall)
     [[ $# -eq 1 && "$1" == --confirm ]] || { usage; exit 2; }
     require_root; bash "$ROOT/scripts/uninstall.sh" --uninstall --confirm ;;
