@@ -1,0 +1,100 @@
+name: Safe owner-managed installer and client subscription checks
+
+on:
+  push:
+    branches: ["feature/**", "main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  installer-static-and-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify Bash and Python syntax
+        run: |
+          set -Eeuo pipefail
+          bash -n install.sh scripts/install.sh scripts/uninstall.sh scripts/sb.sh
+          python3 -m py_compile scripts/*.py
+      - name: Read-only installer plan
+        run: |
+          bash install.sh --help
+          bash scripts/install.sh --plan
+          bash scripts/sb.sh --status
+      - name: Run all offline unit tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Check unsafe root-script execution is absent
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/audit_upstream.py --strict
+          if grep -En 'curl.*\|[[:space:]]*(bash|sh)|wget.*\|[[:space:]]*(bash|sh)|--no-check-certificate|ufw disable|iptables -F|systemctl stop (ssh|sshd)' scripts/install.sh scripts/uninstall.sh scripts/sb.sh; then
+            echo "Blocked dangerous installer pattern"
+            exit 1
+          fi
+      - name: Fetch and verify official sing-box 1.14.4 core
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          VER=1.14.4
+          ASSET="sing-box-$VER-linux-amd64"
+          curl --proto '=https' --tlsv1.2 -fL --max-time 120 --retry 2 \
+            "https://github.com/SagerNet/sing-box/releases/download/v$VER/$ASSET.tar.gz" \
+            -o "$RUNNER_TEMP/core.tgz"
+          printf '%s  %s\n' '699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968' "$RUNNER_TEMP/core.tgz" | sha256sum -c -
+          tar -xOzf "$RUNNER_TEMP/core.tgz" "$ASSET/sing-box" > "$RUNNER_TEMP/sing-box"
+          chmod 755 "$RUNNER_TEMP/sing-box"
+          "$RUNNER_TEMP/sing-box" version
+      - name: Generate all reviewed server protocols and validate with native core
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BIN="$RUNNER_TEMP/sing-box"
+          sudo mkdir -p /etc/singbox-vps-safe
+          sudo openssl req -new -x509 -days 1 -nodes -newkey rsa:2048 \
+            -subj '/CN=example.org' \
+            -keyout /etc/singbox-vps-safe/key.pem \
+            -out /etc/singbox-vps-safe/cert.pem >/dev/null 2>&1
+          for proto in hysteria2 tuic anytls; do
+            case "$proto" in
+              hysteria2) PORT=53546 ;;
+              tuic) PORT=53547 ;;
+              anytls) PORT=53548 ;;
+            esac
+            python3 scripts/generate_config.py --protocol "$proto" --port "$PORT" \
+              --server-name example.org \
+              --tls-cert /etc/singbox-vps-safe/cert.pem \
+              --tls-key /etc/singbox-vps-safe/key.pem \
+              --output "$RUNNER_TEMP/$proto.json"
+            sudo "$BIN" check -c "$RUNNER_TEMP/$proto.json"
+          done
+          python3 scripts/generate_config.py --protocol vless-reality --port 53546 \
+            --handshake-host www.example.org --reality-binary "$BIN" \
+            --output "$RUNNER_TEMP/reality.json"
+          sudo "$BIN" check -c "$RUNNER_TEMP/reality.json"
+          python3 scripts/combine_configs.py --output "$RUNNER_TEMP/combined.json" \
+            "$RUNNER_TEMP/reality.json" "$RUNNER_TEMP/hysteria2.json" \
+            "$RUNNER_TEMP/tuic.json" "$RUNNER_TEMP/anytls.json"
+          sudo "$BIN" check -c "$RUNNER_TEMP/combined.json"
+      - name: Export local client subscriptions and validate native outbound configs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/export_subscriptions.py \
+            --client-meta "$RUNNER_TEMP/combined.json.client.json" \
+            --server 127.0.0.1 --output-parent "$RUNNER_TEMP"
+          FOLDER="$(find "$RUNNER_TEMP" -maxdepth 1 -type d -name 'client-subscriptions-*' | head -n 1)"
+          test -n "$FOLDER"
+          "$RUNNER_TEMP/sing-box" check -c "$FOLDER/sing-box"
+          python3 - "$FOLDER" <<'PY'
+          import json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          for name in ('sing-box', 'v2rayn', 'clash', 'clash2', 'proxies', 'shadowrocket'):
+              assert (root / name).stat().st_mode & 0o077 == 0, name
+          assert len(json.loads((root / 'sing-box').read_text())['outbounds']) == 5
+          print('Native client subscriptions PASS')
+          PY
