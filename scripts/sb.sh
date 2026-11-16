@@ -17,7 +17,7 @@ singbox-vps-safe owner-controlled management:
   sudo bash scripts/sb.sh --backup
   sudo bash scripts/sb.sh --snapshots
   sudo bash scripts/sb.sh --restore SNAPSHOT_ID --confirm
-  sudo bash scripts/sb.sh --export-clients PUBLIC_SERVER_ADDRESS
+  sudo bash scripts/sb.sh --export-clients PUBLIC_SERVER_ADDRESS [CLIENT_METADATA_JSON]
   sudo bash scripts/sb.sh --subscription-init [--public-base-url https://your-domain.example]
   sudo bash scripts/sb.sh --subscription-publish --source-dir /path/to/local/subscriptions
   sudo bash scripts/sb.sh --subscription-urls
@@ -178,8 +178,13 @@ case "$MODE" in
     [[ $# -eq 2 && "$2" == --confirm ]] || { usage; exit 2; }
     require_root; python3 "$ROOT/scripts/state.py" --restore "$1" --confirm ;;
   --export-clients)
-    [[ $# -eq 1 ]] || { usage; exit 2; }
-    require_root; python3 "$ROOT/scripts/export_subscriptions.py" --server "$1" ;;
+    [[ $# -ge 1 && $# -le 2 ]] || { usage; exit 2; }
+    require_root
+    if [[ $# -eq 2 ]]; then
+      python3 "$ROOT/scripts/export_subscriptions.py" --server "$1" --client-meta "$2"
+    else
+      python3 "$ROOT/scripts/export_subscriptions.py" --server "$1"
+    fi ;;
   --subscription-init) require_root; python3 "$ROOT/scripts/local_subscriptions.py" init "$@" ;;
   --subscription-publish) require_root; python3 "$ROOT/scripts/local_subscriptions.py" publish "$@" ;;
   --subscription-urls) require_root; python3 "$ROOT/scripts/local_subscriptions.py" urls ;;
