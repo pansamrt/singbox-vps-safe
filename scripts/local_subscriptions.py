@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""fscarmen local subscription publisher. No external conversion or QR APIs.
+"""Smart local subscription publisher. No external conversion or QR APIs.
 
 Only binds 127.0.0.1. Remote clients require an owner-configured HTTPS reverse
 proxy. No firewall, SSH, nginx, services, or sing-box settings are modified.
@@ -205,7 +205,7 @@ def fix_clash_provider(payload: bytes, url: str):
 def publish(root: Path, source: Path):
     cfg = settings(root)
     if source.is_symlink() or not source.is_dir():
-        raise ValueError("Invalid fscarmen subscription directory")
+        raise ValueError("Invalid Smart subscription source directory")
     generation = "gen-" + uuid.uuid4().hex
     folder = root / generation
     folder.mkdir(mode=0o700)
@@ -224,7 +224,7 @@ def publish(root: Path, source: Path):
                 f.write(data)
             count += 1
         if not count:
-            raise ValueError("No fscarmen subscription files found")
+            raise ValueError("No Smart subscription files found")
         cfg["generation"] = generation
         atomic_json(root / "access.json", cfg)
     except BaseException:

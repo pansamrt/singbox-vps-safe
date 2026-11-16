@@ -1,4 +1,4 @@
-"""Local-only fscarmen subscription tests (never contact public network)."""
+"""Local-only Smart subscription tests (never contact public network)."""
 import http.client
 import importlib.util
 import json
@@ -19,7 +19,7 @@ class SubscriptionsTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / "private"
-        self.source = Path(self.tmp.name) / "fscarmen" / "subscribe"
+        self.source = Path(self.tmp.name) / "smart" / "subscribe"
         self.source.mkdir(parents=True)
         self.source.joinpath("v2rayn").write_text("vless://secret@example.org:443")
         self.source.joinpath("shadowrocket").write_text("BASE64PLACEHOLDER")

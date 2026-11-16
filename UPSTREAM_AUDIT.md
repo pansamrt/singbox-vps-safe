@@ -1,4 +1,4 @@
-# fscarmen/sing-box 安装器第一轮安全审计
+# Smart 上游安装器第一轮安全审计
 
 **基准**：fscarmen/sing-box，提交 `7a666fc870d027790b6b831d219d8d99f13a73a4`，
 存档于 `upstream/fscarmen/sing-box.sh`，Git blob SHA-1 `89ec86fbf37198c1ae3a865a63a1b83bd6178cae`。
@@ -39,7 +39,7 @@
 
 ```bash
 python3 scripts/audit_upstream.py --strict
-python3 scripts/audit_upstream.py --strict --report /tmp/fscarmen-audit.json
+python3 scripts/audit_upstream.py --strict --report /tmp/smart-upstream-audit.json
 ```
 
 两条命令都只读取项目文件，不连接 VPS，不安装、不修改防火墙或系统服务。

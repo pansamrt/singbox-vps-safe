@@ -1,4 +1,4 @@
-name: Pinned fscarmen installer safety gate
+name: Smart upstream installer safety gate
 
 on:
   push:

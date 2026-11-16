@@ -20,7 +20,7 @@ Evidence: https://github.com/pansamrt/singbox-vps-safe/actions/runs/43733183655
 
 - [x] Native sing-box version check, configuration validation and process start.
 - [x] Real SOCKS5 handshake, CONNECT and HTTP traffic forwarding on loopback.
-- [x] Real fscarmen Clash template placeholder expansion; sing-box JSON parsing.
+- [x] Smart integration: real upstream Clash template placeholder expansion; sing-box JSON parsing.
 - [x] V2rayN, Clash/Mihomo, Shadowrocket and sing-box subscription endpoints.
 - [x] Independently generated token, restrictive directory/file permissions.
 - [x] Clash provider URLs repointed to private HTTPS subscription addresses.
@@ -42,7 +42,7 @@ files live in an ephemeral tmpfs. No owner VPS was accessed or modified.
 
 ## Critical remaining work
 
-**A complete fscarmen one-click installer has NOT been run.**
+**The archived original upstream one-click installer has NOT been run.**
 The archived upstream script has unaudited system/firewall modifications,
 remote shell execution and some downloads that bypass TLS verification.
 Executing that installer directly, even on a GitHub runner, would defeat the
@@ -50,8 +50,8 @@ project's safety goals. Its complete installation/uninstallation flow needs
 prior review, a safely adapted version, and isolation in a fully disposable
 VM with independent console recovery.
 
-- [ ] Safely adapt and test actual fscarmen full installer in a disposable VM.
-- [ ] Test real subscription outputs from a completed fscarmen installation;
+- [ ] Safely adapt and test the original upstream full installer in a disposable VM.
+- [ ] Test real subscription outputs from a completed upstream installation;
       this stage used genuine upstream templates with simulated node values.
 - [ ] Verify end-to-end protocol handshakes for VLESS-Reality, Hysteria2,
       TUIC and AnyTLS, including UDP and IPv6.
