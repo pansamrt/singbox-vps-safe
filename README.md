@@ -25,6 +25,10 @@ The original upstream installation script is archived under `upstream/fscarmen` 
   checksums and startup rollback, and scoped uninstall.
 - KejiLion and Actions-bbr-v3 are optional **read-only source/status tools**,
   never installed as part of sing-box.
+- WARP IPv4/IPv6 **optional userspace WireGuard outbound** for an explicitly
+  selected proxy inbound and destination IP family. Never automatically
+  installs or changes the VPS default route. Requires owner-supplied private
+  WireGuard profile; see [WARP guide](docs/WARP.md).
 
 ## Manual test (new disposable VPS strongly recommended)
 
@@ -234,6 +238,39 @@ Uninstall removes only the owned service, binary and installed configuration.
 TLS source files, private metadata and snapshots are preserved to prevent
 accidental credential loss. Review and manually remove them separately if
 no longer needed. There is **no unattended update timer or cron job**.
+
+### Optional WARP IPv4/IPv6 proxy outbound (OFF by default)
+
+Smart does **not** install system WARP or give the VPS new public ingress
+addresses. It can add a userspace WireGuard endpoint to the dedicated
+sing-box service, routing only a specifically selected inbound's IPv4,
+IPv6 or dual-stack destination traffic. Host SSH, firewall, DNS, routes
+and other proxy services are never modified.
+
+The operator must independently provide an authorized root-owned private
+WireGuard-compatible profile (mode 0600). The project does not register
+a Cloudflare account or run a third-party installer.
+
+~~~bash
+sudo bash install.sh --warp-status
+
+# Read-only configuration preflight; no service changes
+sudo bash install.sh --warp-plan --profile /root/smart-warp-private.conf \
+  --inbound vless-reality-in --family ipv6
+
+# Explicitly apply, with private backup and automatic rollback on failure
+sudo bash install.sh --warp-enable --profile /root/smart-warp-private.conf \
+  --inbound vless-reality-in --family ipv6 --confirm
+
+# Remove only Smart's WARP endpoint and selected proxy rules
+sudo bash install.sh --warp-disable --confirm
+~~~
+
+Choose `--family ipv4`, `ipv6`, or `dual`; the owner-selected inbound
+must already exist in Smart's dedicated config. Matching DNS destinations
+may need resolving to an IP before family-specific rules can match.
+Status means **configured**, not that a real WARP handshake/public egress has
+been verified. Read [WARP safety/usage](docs/WARP.md) before trial use.
 
 KejiLion / BBRv3 independent references:
 
