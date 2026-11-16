@@ -157,9 +157,26 @@ IPv6 link URIs are enclosed in brackets (for example,
 supplied, each protocol appears as two separate client nodes; their keys
 are generated locally and **not** duplicated as extra server inbounds.
 
+Local subscription serving **also defaults to dual-stack loopback only**:
+`127.0.0.1:8787` and `[::1]:8787`. For a truly IPv6-only test VPS,
+initialize it with:
+
+~~~bash
+sudo bash install.sh --subscription-init --loopback-mode ipv6
+# The local-only URL then begins with http://[::1]:8787/PRIVATE_TOKEN/
+# Configure the owner-managed HTTPS reverse proxy to [::1]:8787.
+~~~
+
+You can also select `--loopback-mode ipv4` if the test VPS has IPv6
+disabled. These are **loopback** addresses, not Internet listeners; no
+firewall, web server, DNS or TLS certificate is automatically configured.
+If already initialized, changing loopback mode requires an owner-managed
+migration; token rotation does not change the stored listener mode.
+
 The directory suffix EXAMPLE is not literal; use the path printed by the
-exporter. All subscription credentials are saved privately. The default URL
-format is http://127.0.0.1:8787/PRIVATE_TOKEN/auto, which works only locally.
+exporter. All subscription credentials are saved privately. The default printed URL
+is http://127.0.0.1:8787/PRIVATE_TOKEN/auto (also accessible from ::1
+when loopback mode is dual), and works only locally.
 For access from other devices, you must **separately configure your own
 trusted HTTPS reverse proxy** pointing to 127.0.0.1:8787, then rotate the
 public base URL:
