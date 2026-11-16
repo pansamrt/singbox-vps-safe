@@ -166,7 +166,7 @@ class WarpTests(unittest.TestCase):
         layout.config.write_text(json.dumps(original), encoding="utf8")
         layout.config.chmod(0o640)
         ctl = FakeService()
-        with patch.object(warp.update, "require_owned_unit"):
+        with patch.object(warp, "ensure_owned_install"):
             with patch.object(warp.os, "chown"):
                 backup = warp.enable(layout, ctl, self.profile, "vless-reality-in", "dual")
                 self.assertTrue(state.SNAPSHOT_ID.fullmatch(backup))
@@ -194,7 +194,7 @@ class WarpTests(unittest.TestCase):
         layout.config.write_text(json.dumps(original))
         layout.config.chmod(0o640)
         ctl = FakeService(failed_starts=1)
-        with patch.object(warp.update, "require_owned_unit"):
+        with patch.object(warp, "ensure_owned_install"):
             with patch.object(warp.os, "chown"):
                 with self.assertRaises(RuntimeError):
                     warp.enable(layout, ctl, self.profile, "vless-reality-in", "ipv4")
