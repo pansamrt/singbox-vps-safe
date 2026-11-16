@@ -7,6 +7,7 @@ IPv4/IPv6 SOCKS TCP and Hysteria2 QUIC/UDP transport data through loopback.
 """
 from __future__ import annotations
 import http.server
+import http.client
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,7 @@ BINARY = Path("/usr/local/bin/sing-box")
 sys.path.insert(0, str(ROOT / "scripts"))
 import network_modes
 import ports
+import local_subscriptions as subs
 
 
 def assert_true(value, message):
@@ -166,6 +168,68 @@ def generate_test_ca(home: Path):
     return ca, cert, key
 
 
+def http_get(host, port_num, path, timeout=8):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            conn = http.client.HTTPConnection(host, port_num, timeout=1)
+            try:
+                conn.request("GET", path)
+                response = conn.getresponse()
+                return response.status, response.read()
+            finally:
+                conn.close()
+        except OSError:
+            time.sleep(0.15)
+    raise TimeoutError("Local subscription HTTP listener not ready: " + host)
+
+
+def test_local_subscriber_families(home: Path):
+    source = home / "generated-client-subscriptions"
+    source.mkdir()
+    (source / "v2rayn").write_text("vless://SMART_OFFLINE_TEST_NODE", encoding="utf8")
+    for mode in ("dual", "ipv6"):
+        root = home / ("subscription-state-" + mode)
+        local_port = port()
+        subs.init(root, local_port, None, mode)
+        subs.publish(root, source)
+        settings = subs.settings(root)
+        if mode == "ipv6":
+            assert_true(settings["base"] == "http://[::1]:" + str(local_port),
+                        "IPv6-only subscription URL uses bracketed local IPv6 address")
+        process = subprocess.Popen(
+            [sys.executable, "-B", str(ROOT / "scripts/local_subscriptions.py"),
+             "--state-dir", str(root), "serve"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+        )
+        try:
+            prefix = "/" + settings["token"] + "/v2rayn"
+            status, payload = http_get("::1", local_port, prefix)
+            assert_true(status == 200 and b"SMART_OFFLINE_TEST_NODE" in payload,
+                        mode + " local subscription reached over native IPv6")
+            if mode == "dual":
+                status, payload = http_get("127.0.0.1", local_port, prefix)
+                assert_true(status == 200 and b"SMART_OFFLINE_TEST_NODE" in payload,
+                            "Dual local subscription also reached over IPv4")
+            else:
+                try:
+                    with socket.create_connection(("127.0.0.1", local_port), timeout=0.4):
+                        raise AssertionError("IPv6-only local subscription leaked onto IPv4")
+                except OSError:
+                    assert_true(True, "IPv6-only subscription refuses IPv4")
+            invalid, _ = http_get("::1", local_port, "/bad/v2rayn")
+            assert_true(invalid == 404, "Invalid subscription bearer token rejected over IPv6")
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+            if process.stderr:
+                process.stderr.close()
+
+
 def main():
     assert_true(BINARY.is_file(), "Official sing-box native binary is present")
     v = run_checked([str(BINARY), "version"])
@@ -266,6 +330,7 @@ def main():
                         wait_tcp(client_port, active_client.proc)
                         socks_echo("127.0.0.1", client_port, target)
                         assert_true(True, f"Actual Hysteria2 QUIC/UDP + verified TLS over {family}")
+            test_local_subscriber_families(home)
         finally:
             echo.shutdown()
             echo.server_close()
