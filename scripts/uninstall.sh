@@ -47,6 +47,19 @@ systemctl disable --now "$SERVICE"
 rm -f -- "$UNIT" "$CORE" "$CONFIG"
 systemctl daemon-reload
 systemctl reset-failed "$SERVICE" >/dev/null 2>&1 || true
+# Retain TLS materials but revoke group access before removing service user.
+# Prevent later GID reuse from exposing certificate private keys.
+if [[ -d /etc/singbox-vps-safe/managed-tls && ! -L /etc/singbox-vps-safe/managed-tls ]]; then
+  for managed in /etc/singbox-vps-safe/managed-tls/tls-*; do
+    [[ -e "$managed" ]] || continue
+    [[ -f "$managed" && ! -L "$managed" ]] ||
+      die "Refusing unsafe managed TLS material: $managed"
+    chown root:root "$managed"
+    chmod 600 "$managed"
+  done
+  chown root:root /etc/singbox-vps-safe/managed-tls
+  chmod 700 /etc/singbox-vps-safe/managed-tls
+fi
 rmdir /opt/singbox-vps-safe /etc/singbox-vps-safe 2>/dev/null || true
 if getent passwd "$USER_NAME" >/dev/null; then
   HOME_FIELD="$(getent passwd "$USER_NAME" | cut -d : -f 6)"
