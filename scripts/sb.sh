@@ -6,7 +6,7 @@ ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
 
 usage() {
   cat <<'HELP'
-singbox-vps-safe owner-controlled management:
+Smart | singbox-vps-safe — owner-controlled management:
   bash scripts/sb.sh --menu
   bash scripts/sb.sh --plan
   sudo bash scripts/sb.sh --doctor
@@ -98,7 +98,7 @@ menu() {
   python3 "$ROOT/scripts/update.py" --check || echo 'Official version check unavailable; no changes.' >&2
   local selection port hostname confirmation server snap
   while true; do
-    printf '\n=== singbox-vps-safe (owner-managed) ===\n'
+    printf '\n=== Smart (singbox-vps-safe) — owner-managed ===\n'
     echo '1) Dedicated service status'
     echo '2) Read-only install plan and port inventory'
     echo '3) Install dedicated VLESS-Reality (root, first install only)'
