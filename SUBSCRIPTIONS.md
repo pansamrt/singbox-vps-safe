@@ -70,7 +70,7 @@ installation entrypoint.
   subscription on the actual target client before any production release.
 - User-Agent detection is best-effort, and individual endpoints are preferred
   when clients use unusual agents.
-- The fscarmen subscribe/clash and subscribe/clash2 files may use embedded
+- The upstream `subscribe/clash` and `subscribe/clash2` files may use embedded
   proxy-provider URLs. Only known YAML lines ending in /proxies are rewritten.
   Other embedded URLs/complex templates require manual inspection.
 - Tokenized URLs are bearer credentials. HTTPS protects transit but not against
@@ -81,30 +81,30 @@ installation entrypoint.
 - Concurrency and interruption recovery, complete upstream installer auditing,
   OS/architecture integration and manual HTTPS publication still need testing.
 - Mainline version reminders, manual safe updates and independent extensions
-  remain required but will be re-reviewed against the fscarmen layout.
+  remain required but will be re-reviewed against the upstream layout.
 
 ## Release gates
 
-- [x] Fixed fscarmen GPL-3.0 upstream baseline copied for audit
+- [x] Fixed GPL-3.0 upstream baseline copied for Smart provenance and audit
 - [x] No third-party conversion/QR API calls in local publisher
 - [x] Independent random bearer token; rotation and Clash provider rewrite
 - [x] Local-only server; strict allowlist and no URL logging
 - [x] GitHub Actions offline unit tests and real sing-box core + HTTPS subscription runtime integration on disposable Debian 12/13 containers (see tests/integration/README.md)
 - [ ] Failure injection, token changes during publication, lock tests
-- [ ] Disposable full-VM installation with genuinely fscarmen-generated subscription files (the existing container tests use pinned authentic templates with synthetic node values)
+- [ ] Disposable full-VM installation with genuinely upstream-generated subscription files (the existing container tests use pinned authentic templates with synthetic node values)
 - [x] Real Nginx reverse proxy test with disposable private CA, strict TLS hostname/CA validation
 - [ ] Public-CA domain HTTPS and real-client subscription imports
 - [ ] Security audit and safe migration of the upstream installer
-- [ ] fscarmen-safe version updater and independent optional extensions rebase
+- [ ] Smart version updater and independent optional extensions rebase
 
 ## 2026-11-15 Debian runtime verification
 
 The isolated CI matrix has now actually started official sing-box v1.14.4,
-proxied loopback HTTP traffic, served local fscarmen-template subscriptions
+proxied loopback HTTP traffic, served Smart local subscriptions using verified upstream templates
 via Nginx HTTPS, checked token rotation and verified strict TLS CA behavior
 on Debian 12 and 13. See [tests/integration/README.md](tests/integration/README.md).
 
-The original fscarmen one-click installer was **not** executed, as it has
+The archived original upstream one-click installer was **not** executed, as it has
 systemwide effects and insecure remote-download operations that require
 a separate audit before full virtual-machine testing. This is an important
 remaining production-release blocker.
