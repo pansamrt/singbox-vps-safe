@@ -121,7 +121,7 @@ def fixture_files(folder: Path, port: int):
     original_clash = (TEMPLATES / "clash").read_text(encoding="utf8")
     # Mirror fscarmen export_list template replacements on real upstream templates.
     clash = original_clash.replace("PROXY_PROVIDERS_URL", url).replace("NODE_NAME", "LOCAL-SAFE")
-    check("url: " + url in clash, "Pinned fscarmen Clash template substitution")
+    check("url: " + url in clash, "Smart integration: pinned upstream Clash template substitution")
     (folder / "clash").write_text(clash, encoding="utf8")
     # fscarmen's clash2 template is consumed, but no provider URL is assumed.
     clash2 = (TEMPLATES / "clash2").read_text(encoding="utf8")
@@ -132,7 +132,7 @@ def fixture_files(folder: Path, port: int):
     sing = (TEMPLATES / "sing-box").read_text(encoding="utf8")
     outbound = json.dumps({"type": "socks", "tag": "local-safe", "server": "127.0.0.1", "server_port": port})
     sing = sing.replace('"<OUTBOUND_REPLACE>",', outbound + ",").replace('"<NODE_REPLACE>"', '"local-safe"')
-    check("<OUTBOUND_REPLACE>" not in sing, "Pinned fscarmen sing-box template placeholder expansion")
+    check("<OUTBOUND_REPLACE>" not in sing, "Smart integration: pinned upstream sing-box template expansion")
     json.loads(sing)
     (folder / "sing-box").write_text(sing, encoding="utf8")
     (folder / "v2rayn").write_text("vless://" + example_uuid + "@127.0.0.1:443#local-safe\n")
@@ -220,7 +220,7 @@ def integration():
     version = subprocess.run([str(BINARY), "version"], capture_output=True, text=True, check=True, timeout=10)
     check("sing-box version " + EXPECTED_VERSION in version.stdout, "Official core reports pinned version")
     check((TEMPLATES / "clash").is_file() and (TEMPLATES / "sing-box").is_file(),
-          "Actual pinned fscarmen client templates mounted")
+          "Smart integration: pinned upstream client templates mounted")
 
     with tempfile.TemporaryDirectory(prefix="sb-runtime-") as scratch:
         home = Path(scratch)
@@ -308,7 +308,7 @@ def integration():
             ok, body, _ = get(sub_port, prefix + "clash")
             provider = f"https://subscriptions.example.invalid:{tls_port}/" + token + "/proxies"
             check(ok == 200 and provider.encode() in body,
-                  "Real fscarmen Clash template now uses independent tokenized HTTPS provider URL")
+                  "Smart Clash template uses independent tokenized HTTPS provider URL")
             check(node_uuid.encode() not in body,
                   "Node UUID is not reused in Clash provider address")
             ok, body, _ = get(sub_port, prefix + "proxies")
