@@ -1,4 +1,4 @@
-name: Debian runtime and fscarmen local subscription integration
+name: Smart Debian runtime and local subscription integration
 
 on:
   push:
@@ -35,7 +35,7 @@ jobs:
           chmod 755 "$RUNNER_TEMP/core/sing-box"
           "$RUNNER_TEMP/core/sing-box" version
 
-      - name: Download real pinned fscarmen client templates with Git blob validation
+      - name: Verify pinned upstream client templates with Git blob validation
         shell: bash
         run: |
           set -Eeuo pipefail
