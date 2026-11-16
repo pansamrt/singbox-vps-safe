@@ -110,3 +110,23 @@ jobs:
             --workdir /work \
             "singbox-test:debian-${{ matrix.debian }}" \
             python3 -B tests/integration/dual_stack_runtime.py
+
+      - name: Check Smart WARP endpoint and direct fallback with official core (offline)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker run --rm \
+            --network none \
+            --cap-drop ALL \
+            --user 65534:65534 \
+            --security-opt no-new-privileges \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=128m \
+            --pids-limit 96 \
+            --memory 1g \
+            --cpus 1.5 \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/work,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/core/sing-box,dst=/usr/local/bin/sing-box,readonly" \
+            --workdir /work \
+            "singbox-test:debian-${{ matrix.debian }}" \
+            python3 -B tests/integration/warp_runtime.py
