@@ -64,16 +64,23 @@ extensions() {
   esac
 }
 subscriptions() {
-  local n
+  local n backend
   echo "1) Initialize private subscription token"
   echo "2) Publish pre-generated local subscription files"
   echo "3) Print private addresses (do not share screenshots)"
   echo "4) Rotate token / revoke old URLs"
-  echo "5) Launch local 127.0.0.1 subscription server in foreground"
+  echo "5) Launch private IPv4/IPv6 loopback subscription server (foreground)"
   echo "0) Back"
   read -r -p 'Select: ' n || return 0
   case "$n" in
-    1) require_root && python3 "$ROOT/scripts/local_subscriptions.py" init ;;
+    1)
+      require_root || return 1
+      read -r -p 'Local subscription loopback [dual/ipv4/ipv6] (default dual): ' backend || return 0
+      backend="${backend:-dual}"
+      case "$backend" in
+        dual|ipv4|ipv6) python3 "$ROOT/scripts/local_subscriptions.py" init --loopback-mode "$backend" ;;
+        *) echo 'Invalid subscription loopback mode' >&2; return 1 ;;
+      esac ;;
     2)
       require_root || return 1
       local p
