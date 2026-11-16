@@ -91,11 +91,8 @@ fi
 [[ ! -e "$UNIT" && ! -L "$UNIT" && ! -e "$TARGET" && ! -L "$TARGET" && ! -e "$CONFIG" && ! -L "$CONFIG" ]] ||
   die "Existing dedicated installation. Refusing overwrite."
 [[ ! -e "$STATE" && ! -L "$STATE" ]] || die "State directory already exists."
-[[ ! -L "$CONF_DIR" ]] || die "Config directory symlink is forbidden"
-if [[ -e "$CONF_DIR" ]]; then
-  [[ -d "$CONF_DIR" && "$(stat -c %u "$CONF_DIR")" == 0 ]] ||
-    die "Pre-existing TLS config directory must be root-owned"
-fi
+[[ ! -e "$CONF_DIR" && ! -L "$CONF_DIR" ]] ||
+  die "Dedicated config directory already exists; refusing overwrite"
 [[ ! -e "$CONF_DIR/managed-tls" && ! -L "$CONF_DIR/managed-tls" ]] ||
   die "Refusing pre-existing managed TLS directory"
 if getent passwd "$USER_NAME" >/dev/null; then die "Dedicated user exists, refusing reuse"; fi
@@ -154,8 +151,7 @@ fi
 cat > "$UNIT" <<'UNITFILE'
 [Unit]
 Description=singbox-vps-safe isolated sing-box
-After=network-online.target
-Wants=network-online.target
+After=network.target
 [Service]
 Type=simple
 User=singbox-safe
