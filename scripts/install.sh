@@ -91,7 +91,7 @@ if [[ -e "$CONF_DIR" ]]; then
 fi
 if getent passwd "$USER_NAME" >/dev/null; then die "Dedicated user exists, refusing reuse"; fi
 
-WORK="$(mktemp -d /tmp/singbox-vps-safe.XXXXXXXX)"
+WORK="$(mktemp -d /var/tmp/singbox-vps-safe.XXXXXXXX)"
 ASSET="sing-box-$CORE_VERSION-linux-$ARCH"
 URL="https://github.com/SagerNet/sing-box/releases/download/v$CORE_VERSION/$ASSET.tar.gz"
 if [[ -n "${SAFE_OFFLINE_ARCHIVE:-}" ]]; then
