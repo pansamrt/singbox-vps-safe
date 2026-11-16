@@ -181,6 +181,30 @@ class WarpTests(unittest.TestCase):
                 self.assertEqual(warp.load_config(layout), original)
                 self.assertFalse(warp.marker_path(layout).exists())
 
+    def test_manual_edit_refuses_disable_without_stopping_service(self):
+        layout = state.Layout(binary=self.root / "sing-box",
+                              config=self.root / "config.json",
+                              unit=self.root / "unit.service",
+                              state=self.root / "state")
+        layout.binary.write_bytes(b"fake-stub-binary")
+        layout.binary.chmod(0o755)
+        layout.unit.write_text("[Service]\nUser=singbox-safe\n")
+        layout.unit.chmod(0o644)
+        layout.config.write_text(json.dumps(base_config()))
+        layout.config.chmod(0o640)
+        ctl = FakeService()
+        with patch.object(warp, "ensure_owned_install"), patch.object(warp.os, "chown"):
+            warp.enable(layout, ctl, self.profile, "vless-reality-in", "dual")
+            current = warp.load_config(layout)
+            current["log"]["level"] = "error"
+            layout.config.write_text(json.dumps(current))
+            initial_stops = ctl.stop_calls
+            with self.assertRaisesRegex(RuntimeError, "changed since enable"):
+                warp.disable(layout, ctl)
+            self.assertEqual(ctl.stop_calls, initial_stops)
+            self.assertTrue(ctl.active)
+            self.assertTrue(warp.marker_path(layout).exists())
+
     def test_startup_failure_restores_old_config_and_no_marker(self):
         layout = state.Layout(binary=self.root / "sing-box",
                               config=self.root / "config.json",
