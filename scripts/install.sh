@@ -41,11 +41,16 @@ trap 'exit 143' TERM
 case "$ACTION" in
   --help|-h)
     echo "Usage: bash scripts/install.sh --plan"
+    echo "       sudo bash scripts/install.sh --install-reality PORT HANDSHAKE_DOMAIN"
     echo "       sudo bash scripts/install.sh --install /absolute/config.json"
     exit 0 ;;
   --plan) [[ $# -eq 1 ]] || die "Unexpected extra argument" ;;
   --install) [[ $# -eq 2 && "$2" == /* ]] || die "Specify absolute config path"; SOURCE="$2" ;;
-  *) die "Invalid action. Use --plan or --install." ;;
+  --install-reality)
+    [[ $# -eq 3 && "$2" =~ ^[0-9]+$ ]] || die "Use --install-reality PORT HANDSHAKE_DOMAIN"
+    REALITY_PORT="$2"; REALITY_DOMAIN="$3"
+    ;;
+  *) die "Invalid action. Use --plan, --install or --install-reality." ;;
 esac
 [[ "$(uname -s)" == Linux ]] || die "Linux only"
 # shellcheck disable=SC1091
@@ -70,14 +75,19 @@ if [[ "$ACTION" == --plan ]]; then
   exit 0
 fi
 [[ $EUID -eq 0 ]] || die "Root required for explicit install"
-[[ -f "$SOURCE" && -r "$SOURCE" && ! -L "$SOURCE" ]] || die "Refusing missing or symlinked config"
+if [[ "$ACTION" == --install ]]; then
+  [[ -f "$SOURCE" && -r "$SOURCE" && ! -L "$SOURCE" ]] || die "Refusing missing or symlinked config"
+fi
 [[ ! -e "$UNIT" && ! -L "$UNIT" && ! -e "$TARGET" && ! -L "$TARGET" && ! -e "$CONFIG" && ! -L "$CONFIG" ]] ||
   die "Existing dedicated installation. Refusing overwrite."
 [[ ! -e "$STATE" && ! -L "$STATE" ]] || die "State directory already exists."
-[[ ! -e "$CONF_DIR" && ! -L "$CONF_DIR" ]] || die "Config directory already exists. Refusing overwrite."
+[[ ! -L "$CONF_DIR" ]] || die "Config directory symlink is forbidden"
+if [[ -e "$CONF_DIR" ]]; then
+  [[ -d "$CONF_DIR" && "$(stat -c %u "$CONF_DIR")" == 0 ]] ||
+    die "Pre-existing TLS config directory must be root-owned"
+fi
 if getent passwd "$USER_NAME" >/dev/null; then die "Dedicated user exists, refusing reuse"; fi
 
-python3 "$SOURCE_DIR/ports.py" --config "$SOURCE" || die "TCP/UDP port preflight refused"
 WORK="$(mktemp -d /tmp/singbox-vps-safe.XXXXXXXX)"
 ASSET="sing-box-$VERSION-linux-$ARCH"
 URL="https://github.com/SagerNet/sing-box/releases/download/v$VERSION/$ASSET.tar.gz"
@@ -90,6 +100,15 @@ tar -xOzf "$WORK/core.tar.gz" "$ASSET/sing-box" > "$WORK/sing-box" ||
 chmod 755 "$WORK/sing-box"
 "$WORK/sing-box" version | grep -Fx "sing-box version $VERSION" >/dev/null ||
   die "Core version mismatch"
+if [[ "$ACTION" == --install-reality ]]; then
+  python3 "$SOURCE_DIR/generate_config.py" \
+    --protocol vless-reality --port "$REALITY_PORT" \
+    --handshake-host "$REALITY_DOMAIN" \
+    --reality-binary "$WORK/sing-box" --output "$WORK/generated.json" ||
+    die "Local Reality config generation failed"
+  SOURCE="$WORK/generated.json"
+fi
+python3 "$SOURCE_DIR/ports.py" --config "$SOURCE" || die "TCP/UDP port preflight refused"
 "$WORK/sing-box" check -c "$SOURCE" || die "Config check failed before any system changes"
 say "Preflight passed. Creating only dedicated resources."
 MUTATED=1
@@ -101,6 +120,9 @@ install -d -o root -g "$USER_NAME" -m 750 "$CONF_DIR"
 install -d -o root -g root -m 700 "$STATE"
 install -m 755 "$WORK/sing-box" "$TARGET/sing-box"
 install -m 640 -o root -g "$USER_NAME" "$SOURCE" "$CONFIG"
+if [[ "$ACTION" == --install-reality ]]; then
+  install -m 600 -o root -g root "$WORK/generated.json.client.json" "$STATE/client.json"
+fi
 cat > "$UNIT" <<'UNITFILE'
 [Unit]
 Description=singbox-vps-safe isolated sing-box
@@ -118,8 +140,8 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
-CapabilityBoundingSet=
-AmbientCapabilities=
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 UMask=0077
 [Install]
