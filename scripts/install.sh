@@ -94,8 +94,14 @@ if getent passwd "$USER_NAME" >/dev/null; then die "Dedicated user exists, refus
 WORK="$(mktemp -d /tmp/singbox-vps-safe.XXXXXXXX)"
 ASSET="sing-box-$CORE_VERSION-linux-$ARCH"
 URL="https://github.com/SagerNet/sing-box/releases/download/v$CORE_VERSION/$ASSET.tar.gz"
-curl --proto '=https' --tlsv1.2 -fL --retry 2 --connect-timeout 15 --max-time 120 \
-  -o "$WORK/core.tar.gz" "$URL" || die "Official download failed"
+if [[ -n "${SAFE_OFFLINE_ARCHIVE:-}" ]]; then
+  [[ "$SAFE_OFFLINE_ARCHIVE" == /* && -f "$SAFE_OFFLINE_ARCHIVE" && ! -L "$SAFE_OFFLINE_ARCHIVE" ]] ||
+    die "Offline archive must be an absolute regular file, not a symlink"
+  cp -- "$SAFE_OFFLINE_ARCHIVE" "$WORK/core.tar.gz"
+else
+  curl --proto '=https' --tlsv1.2 -fL --retry 2 --connect-timeout 15 --max-time 120 \
+    -o "$WORK/core.tar.gz" "$URL" || die "Official download failed"
+fi
 printf '%s  %s\n' "$SHA" "$WORK/core.tar.gz" | sha256sum -c --status ||
   die "Core SHA256 mismatch"
 tar -xOzf "$WORK/core.tar.gz" "$ASSET/sing-box" > "$WORK/sing-box" ||
