@@ -3,7 +3,7 @@
 # Explicit owner-only install. Archived fscarmen script is NEVER executed here.
 set -Eeuo pipefail
 umask 077
-VERSION=1.14.4
+CORE_VERSION=1.14.4
 SHA_AMD64=699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968
 SHA_ARM64=436441f76ee2f7fe21b5b2d426d3cb261a480455a704865789ad533e4273ec26
 TARGET=/opt/singbox-vps-safe
@@ -70,7 +70,7 @@ esac
 for cmd in curl sha256sum tar python3 systemctl useradd userdel getent install ss; do
   command -v "$cmd" >/dev/null || die "Missing prerequisite: $cmd"
 done
-say "Pinned core v$VERSION ($ARCH). Separate service: $SERVICE."
+say "Pinned core v$CORE_VERSION ($ARCH). Separate service: $SERVICE."
 say "SSH, DNS, firewall, WARP, BBR, original sing-box and Hysteria2 stay untouched."
 if [[ "$ACTION" == --plan ]]; then
   say "PLAN ONLY, no downloads or modifications."
@@ -92,8 +92,8 @@ fi
 if getent passwd "$USER_NAME" >/dev/null; then die "Dedicated user exists, refusing reuse"; fi
 
 WORK="$(mktemp -d /tmp/singbox-vps-safe.XXXXXXXX)"
-ASSET="sing-box-$VERSION-linux-$ARCH"
-URL="https://github.com/SagerNet/sing-box/releases/download/v$VERSION/$ASSET.tar.gz"
+ASSET="sing-box-$CORE_VERSION-linux-$ARCH"
+URL="https://github.com/SagerNet/sing-box/releases/download/v$CORE_VERSION/$ASSET.tar.gz"
 curl --proto '=https' --tlsv1.2 -fL --retry 2 --connect-timeout 15 --max-time 120 \
   -o "$WORK/core.tar.gz" "$URL" || die "Official download failed"
 printf '%s  %s\n' "$SHA" "$WORK/core.tar.gz" | sha256sum -c --status ||
@@ -101,7 +101,7 @@ printf '%s  %s\n' "$SHA" "$WORK/core.tar.gz" | sha256sum -c --status ||
 tar -xOzf "$WORK/core.tar.gz" "$ASSET/sing-box" > "$WORK/sing-box" ||
   die "Expected binary missing"
 chmod 755 "$WORK/sing-box"
-"$WORK/sing-box" version | grep -Fx "sing-box version $VERSION" >/dev/null ||
+"$WORK/sing-box" version | grep -Fx "sing-box version $CORE_VERSION" >/dev/null ||
   die "Core version mismatch"
 if [[ "$ACTION" == --install-reality ]]; then
   python3 "$SOURCE_DIR/generate_config.py" \
