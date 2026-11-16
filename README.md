@@ -1,12 +1,12 @@
-# singbox-vps-safe — owner-controlled sing-box VPS installer
+# Smart — singbox-vps-safe
 
-**Status: manual-test candidate; not yet production-approved. No deployment to the owner's VPS has occurred.**
+**Smart** is the owner-controlled sing-box installer and local subscription manager. **Status: manual-test candidate; not yet production-approved. No deployment to the owner's VPS has occurred.**
 
-Based on [fscarmen/sing-box](https://github.com/fscarmen/sing-box), fixed upstream
+**Upstream attribution (retained for GPL-3.0 compliance):** Based on [fscarmen/sing-box](https://github.com/fscarmen/sing-box), fixed upstream
 commit [7a666fc](https://github.com/fscarmen/sing-box/commit/7a666fc870d027790b6b831d219d8d99f13a73a4).
 Retains GPL-3.0 and original authorship. The previous yonggekkk baseline is cancelled.
 
-The original fscarmen script is archived under upstream/fscarmen for audit,
+The original upstream installation script is archived under `upstream/fscarmen` for audit,
 **NOT for direct root execution**. Read [UPSTREAM_AUDIT.md](UPSTREAM_AUDIT.md).
 
 ## Implemented functions
