@@ -118,6 +118,11 @@ class StateTests(unittest.TestCase):
         cert.write_bytes(b"original-test-cert")
         key.chmod(0o640)
         cert.chmod(0o640)
+        self.layout.config.write_text(
+            '{"inbounds":[{"tls":{"certificate_path":"' + str(cert) +
+            '","key_path":"' + str(key) + '"}}]}'
+        )
+        self.layout.config.chmod(0o640)
         snap = state.create_snapshot(self.layout, self.ctl)
         source, manifest = state.load_snapshot(self.layout, snap)
         self.assertEqual(set(manifest["tls"]), {"tls-0.key", "tls-0.crt"})
