@@ -34,8 +34,8 @@ GitHub CLI / SSH access. Never paste GitHub tokens into a public command.
 gh repo clone pansamrt/singbox-vps-safe
 cd singbox-vps-safe
 
-# Until PR #16 merges:
-git switch feature/owner-manual-safe-install
+# After the tested changes are merged, use the default branch:
+git switch main
 
 # Always first inspect ports; no system changes:
 bash install.sh --plan
@@ -89,10 +89,18 @@ sudo bash install.sh --install /absolute/path/hy2.json
 
 The installer stages user-provided TLS files privately and copies them into
 a dedicated managed-tls directory readable only by root and the service
-group. The original TLS source files are not modified. Real renewals still
-require an owner-managed certificate workflow. For multiple inbounds,
-generate fragments individually and combine with
-scripts/combine_configs.py before explicit installation.
+group. The original TLS source files are not modified and input symlinks
+are rejected. Real renewals still require an owner-managed certificate
+workflow. For multiple inbounds, generate fragments individually and combine
+with scripts/combine_configs.py before explicit installation.
+
+For JSON-based Hysteria2, TUIC or AnyTLS installations, the locally generated
+private client sidecar is **not** automatically copied into the VPS state.
+Export from that specific sidecar by passing it as the second argument:
+
+~~~bash
+sudo bash install.sh --export-clients YOUR_VPS_PUBLIC_IP /absolute/path/hy2.json.client.json
+~~~
 
 ### Local subscription URLs (no third-party conversion)
 
