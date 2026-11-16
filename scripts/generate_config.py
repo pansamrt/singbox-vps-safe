@@ -14,6 +14,8 @@ import subprocess
 import sys
 import uuid
 
+from network_modes import resolve_listen
+
 DOMAIN = re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$")
 KEY = re.compile(r"^[A-Za-z0-9_-]{40,64}$")
 
@@ -141,7 +143,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--protocol", choices=["vless-reality", "hysteria2", "tuic", "anytls"],
                         required=True)
     parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--listen", default="0.0.0.0")
+    parser.add_argument("--network-mode", choices=["dual", "ipv4", "ipv6"],
+                        help="dual (default), ipv4, or ipv6; IPv6-only requires --listen")
+    parser.add_argument("--listen", help="optional explicit IPv4/IPv6 listen address")
     parser.add_argument("--server-name", help="TLS certificate hostname")
     parser.add_argument("--tls-cert", help="absolute server certificate path")
     parser.add_argument("--tls-key", help="absolute server private key path")
@@ -158,9 +162,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("Output and .client.json must not already exist")
     old_umask = os.umask(0o077)
     try:
-        config, client = build_config(args.protocol, args.port, args.listen, args.server_name,
+        mode, listen = resolve_listen(args.network_mode, args.listen)
+        config, client = build_config(args.protocol, args.port, listen, args.server_name,
                                       args.tls_cert, args.tls_key, args.handshake_host,
                                       args.reality_binary)
+        client["network_mode"] = mode
         created_output = False
         try:
             private_write(output, config)
