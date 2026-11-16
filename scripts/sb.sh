@@ -10,7 +10,7 @@ Smart | singbox-vps-safe — owner-controlled management:
   bash scripts/sb.sh --menu
   bash scripts/sb.sh --plan
   sudo bash scripts/sb.sh --doctor
-  sudo bash scripts/sb.sh --install-reality PORT HANDSHAKE_DOMAIN
+  sudo bash scripts/sb.sh --install-reality PORT HANDSHAKE_DOMAIN [--network-mode dual|ipv4|ipv6] [--listen IPV6_ADDRESS]
   sudo bash scripts/sb.sh --install /absolute/config.json
   bash scripts/sb.sh --generate --protocol vless-reality --port 8443 --handshake-host www.example.org --output ./server.json
   bash scripts/sb.sh --check-update
@@ -19,6 +19,7 @@ Smart | singbox-vps-safe — owner-controlled management:
   sudo bash scripts/sb.sh --snapshots
   sudo bash scripts/sb.sh --restore SNAPSHOT_ID --confirm
   sudo bash scripts/sb.sh --export-clients PUBLIC_SERVER_ADDRESS [CLIENT_METADATA_JSON]
+  sudo bash scripts/sb.sh --export-clients --server-ipv4 IPv4 --server-ipv6 IPv6
   sudo bash scripts/sb.sh --subscription-init [--public-base-url https://your-domain.example]
   sudo bash scripts/sb.sh --subscription-publish --source-dir /path/to/local/subscriptions
   sudo bash scripts/sb.sh --subscription-urls
@@ -96,7 +97,7 @@ subscriptions() {
 menu() {
   echo 'Checking official stable sing-box version; this is read-only.'
   python3 "$ROOT/scripts/update.py" --check || echo 'Official version check unavailable; no changes.' >&2
-  local selection port hostname confirmation server snap
+  local selection port hostname confirmation server snap mode listen_addr ip4 ip6
   while true; do
     printf '\n=== Smart (singbox-vps-safe) — owner-managed ===\n'
     echo '1) Dedicated service status'
@@ -119,10 +120,22 @@ menu() {
         require_root || continue
         read -r -p 'Port: ' port || return 0
         read -r -p 'Reality handshake DNS hostname: ' hostname || return 0
+        read -r -p 'Network [dual/ipv4/ipv6] (default dual): ' mode || return 0
+        mode="${mode:-dual}"
+        case "$mode" in dual|ipv4|ipv6) ;; *) echo 'Unsupported mode'; continue ;; esac
+        if [[ "$mode" == ipv6 ]]; then
+          read -r -p 'Concrete VPS IPv6 listening address (not ::): ' listen_addr || return 0
+          [[ -n "$listen_addr" ]] || { echo 'IPv6 address required'; continue; }
+        fi
         echo 'Only the dedicated service will be created. No firewall will be opened.'
         read -r -p 'Type INSTALL to approve: ' confirmation || return 0
-        [[ "$confirmation" == INSTALL ]] &&
-          bash "$ROOT/scripts/install.sh" --install-reality "$port" "$hostname"
+        if [[ "$confirmation" == INSTALL ]]; then
+          if [[ "$mode" == ipv6 ]]; then
+            bash "$ROOT/scripts/install.sh" --install-reality "$port" "$hostname" --network-mode ipv6 --listen "$listen_addr"
+          else
+            bash "$ROOT/scripts/install.sh" --install-reality "$port" "$hostname" --network-mode "$mode"
+          fi
+        fi
         ;;
       4) python3 "$ROOT/scripts/update.py" --check ;;
       5)
@@ -142,8 +155,15 @@ menu() {
         fi ;;
       8)
         require_root || continue
-        read -r -p 'Your VPS public IP or DNS name: ' server || return 0
-        python3 "$ROOT/scripts/export_subscriptions.py" --server "$server" ;;
+        read -r -p 'Public DNS/IP (blank to enter both IPv4 and IPv6): ' server || return 0
+        if [[ -n "$server" ]]; then
+          python3 "$ROOT/scripts/export_subscriptions.py" --server "$server"
+        else
+          read -r -p 'Public IPv4 address: ' ip4 || return 0
+          read -r -p 'Public IPv6 address: ' ip6 || return 0
+          [[ -n "$ip4" && -n "$ip6" ]] || { echo 'Both addresses are required'; continue; }
+          python3 "$ROOT/scripts/export_subscriptions.py" --server-ipv4 "$ip4" --server-ipv6 "$ip6"
+        fi ;;
       9) subscriptions ;;
       10) extensions ;;
       11)
@@ -183,12 +203,15 @@ case "$MODE" in
     [[ $# -eq 2 && "$2" == --confirm ]] || { usage; exit 2; }
     require_root; python3 "$ROOT/scripts/state.py" --restore "$1" --confirm ;;
   --export-clients)
-    [[ $# -ge 1 && $# -le 2 ]] || { usage; exit 2; }
     require_root
-    if [[ $# -eq 2 ]]; then
+    if [[ $# -ge 1 && "$1" == --* ]]; then
+      python3 "$ROOT/scripts/export_subscriptions.py" "$@"
+    elif [[ $# -eq 2 ]]; then
       python3 "$ROOT/scripts/export_subscriptions.py" --server "$1" --client-meta "$2"
-    else
+    elif [[ $# -eq 1 ]]; then
       python3 "$ROOT/scripts/export_subscriptions.py" --server "$1"
+    else
+      usage; exit 2
     fi ;;
   --subscription-init) require_root; python3 "$ROOT/scripts/local_subscriptions.py" init "$@" ;;
   --subscription-publish) require_root; python3 "$ROOT/scripts/local_subscriptions.py" publish "$@" ;;
