@@ -51,14 +51,25 @@ trap 'exit 143' TERM
 case "$ACTION" in
   --help|-h)
     echo "Usage: bash scripts/install.sh --plan"
-    echo "       sudo bash scripts/install.sh --install-reality PORT HANDSHAKE_DOMAIN"
+    echo "       sudo bash scripts/install.sh --install-reality PORT HANDSHAKE_DOMAIN [--network-mode dual|ipv4|ipv6] [--listen IPV6_ADDRESS]"
     echo "       sudo bash scripts/install.sh --install /absolute/config.json"
     exit 0 ;;
   --plan) [[ $# -eq 1 ]] || die "Unexpected extra argument" ;;
   --install) [[ $# -eq 2 && "$2" == /* ]] || die "Specify absolute config path"; SOURCE="$2" ;;
   --install-reality)
-    [[ $# -eq 3 && "$2" =~ ^[0-9]+$ ]] || die "Use --install-reality PORT HANDSHAKE_DOMAIN"
+    [[ $# -ge 3 && "$2" =~ ^[0-9]+$ ]] || die "Use --install-reality PORT HANDSHAKE_DOMAIN [--network-mode MODE] [--listen ADDRESS]"
     REALITY_PORT="$2"; REALITY_DOMAIN="$3"
+    shift 3
+    NET_ARGS=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --network-mode|--listen)
+          [[ $# -ge 2 && -n "$2" ]] || die "Missing value after $1"
+          NET_ARGS+=("$1" "$2")
+          shift 2 ;;
+        *) die "Unknown network option: $1" ;;
+      esac
+    done
     ;;
   *) die "Invalid action. Use --plan, --install or --install-reality." ;;
 esac
@@ -78,6 +89,7 @@ for cmd in curl sha256sum tar python3 systemctl useradd userdel getent install s
   command -v "$cmd" >/dev/null || die "Missing prerequisite: $cmd"
 done
 say "Pinned core v$CORE_VERSION ($ARCH). Separate service: $SERVICE."
+say "Reality network default: dual IPv4/IPv6 (::), with both-family TCP port preflight."
 say "SSH, DNS, firewall, WARP, BBR, original sing-box and Hysteria2 stay untouched."
 if [[ "$ACTION" == --plan ]]; then
   say "PLAN ONLY, no downloads or modifications."
@@ -118,7 +130,7 @@ chmod 755 "$WORK/sing-box"
 if [[ "$ACTION" == --install-reality ]]; then
   python3 "$SOURCE_DIR/generate_config.py" \
     --protocol vless-reality --port "$REALITY_PORT" \
-    --handshake-host "$REALITY_DOMAIN" \
+    --handshake-host "$REALITY_DOMAIN" "${NET_ARGS[@]}" \
     --reality-binary "$WORK/sing-box" --output "$WORK/generated.json" ||
     die "Local Reality config generation failed"
   SOURCE="$WORK/generated.json"
