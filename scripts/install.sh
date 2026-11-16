@@ -27,6 +27,9 @@ cleanup() {
     say "Install failed, recovering dedicated files only."
     systemctl disable --now "$SERVICE" >/dev/null 2>&1 || true
     rm -f -- "$UNIT" "$CONFIG" "$TARGET/sing-box"
+    if [[ "$ACTION" == --install-reality ]]; then
+      rm -f -- "$STATE/client.json"
+    fi
     systemctl daemon-reload >/dev/null 2>&1 || true
     rmdir "$TARGET" "$CONF_DIR" "$STATE" >/dev/null 2>&1 || true
     if [[ $CREATED_USER -eq 1 ]]; then userdel "$USER_NAME" >/dev/null 2>&1 || true; fi
