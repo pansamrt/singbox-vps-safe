@@ -142,6 +142,20 @@ grep -Fq '/etc/singbox-vps-safe/managed-tls/tls-0.key' /etc/singbox-vps-safe/con
 runuser -u singbox-safe -- /opt/singbox-vps-safe/sing-box check \
   -c /etc/singbox-vps-safe/config.json
 echo "PASS: Hysteria2 TLS installed and native-checked with nonroot readable copied key"
+# Verify snapshot captures the actual managed TLS key/certificate and safely
+# recovers an invalid key on the disposable Debian test filesystem.
+python3 scripts/state.py --backup
+TLS_SNAPSHOT="$(python3 scripts/state.py --list | tail -n 1)"
+test -n "$TLS_SNAPSHOT"
+test -f "/var/lib/singbox-vps-safe/snapshots/$TLS_SNAPSHOT/tls/tls-0.key"
+cp /etc/singbox-vps-safe/managed-tls/tls-0.key /tmp/ci-original-tls.key
+printf 'invalid changed key\n' > /etc/singbox-vps-safe/managed-tls/tls-0.key
+chown root:singbox-safe /etc/singbox-vps-safe/managed-tls/tls-0.key
+chmod 640 /etc/singbox-vps-safe/managed-tls/tls-0.key
+python3 scripts/state.py --restore "$TLS_SNAPSHOT" --confirm
+cmp /tmp/ci-original-tls.key /etc/singbox-vps-safe/managed-tls/tls-0.key
+runuser -u singbox-safe -- /opt/singbox-vps-safe/sing-box check -c /etc/singbox-vps-safe/config.json
+echo "PASS: actual managed TLS key restored from hashed backup after key corruption"
 bash scripts/uninstall.sh --uninstall --confirm
 test -f /etc/singbox-vps-safe/managed-tls/tls-0.key
 test "$(stat -c %a /etc/singbox-vps-safe/managed-tls/tls-0.key)" = 600
