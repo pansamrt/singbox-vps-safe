@@ -35,10 +35,11 @@ MAX_CONFIG = 512 * 1024
 INBOUND_TAG = re.compile(r"^[a-zA-Z0-9._-]{1,80}$")
 
 
-def private_file(path: Path, max_size: int) -> bytes:
+def private_file(path: Path, max_size: int, allow_service_group: bool = False) -> bytes:
     info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or (info.st_mode & 0o077):
-        raise ValueError("Input must be a private regular file (0600; no symlinks)")
+    forbidden = 0o037 if allow_service_group else 0o077
+    if not stat.S_ISREG(info.st_mode) or (info.st_mode & forbidden):
+        raise ValueError("Input must be a private regular file (no symlinks or public access)")
     if info.st_uid != os.geteuid() or not 0 < info.st_size <= max_size:
         raise ValueError("Unexpected input owner or file length")
     with path.open("rb") as stream:
@@ -147,7 +148,7 @@ def fingerprint(config: dict) -> str:
 
 
 def load_config(layout: state.Layout) -> dict:
-    data = private_file(layout.config, MAX_CONFIG)
+    data = private_file(layout.config, MAX_CONFIG, allow_service_group=True)
     result = json.loads(data)
     if not isinstance(result, dict) or not isinstance(result.get("inbounds"), list):
         raise ValueError("Invalid dedicated sing-box configuration")
@@ -362,7 +363,7 @@ def status(layout: state.Layout):
         same = fingerprint(active) == record["after"]
     except (OSError, ValueError):
         same = False
-    print("Smart WARP:", "configuration active" if same else "CONFIGURATION CHANGED; manual review required")
+    print("Smart WARP:", "configured (live tunnel not verified)" if same else "CONFIGURATION CHANGED; manual review required")
     print("Selected inbound:", record["inbound"])
     print("Proxy destination family:", record["family"])
     print("Original snapshot ID:", record["snapshot"])
@@ -395,9 +396,11 @@ def main(argv=None) -> int:
             return 0
         if args.action in ("enable", "disable") and not args.confirm:
             p.error("Enable/disable requires explicit --confirm")
+        ensure_owned_install(layout, ctl)
         with state.operation_lock(layout):
             if args.action == "plan":
-                ensure_owned_install(layout, ctl)
+                if marker_path(layout).exists() or marker_path(layout).is_symlink():
+                    raise RuntimeError("WARP already configured; cannot plan another enable")
                 base = load_config(layout)
                 candidate = add_warp(base, read_profile(args.profile, args.family),
                                      args.inbound, args.family)
