@@ -99,13 +99,13 @@ def recv_exact(sock, size):
     return data
 
 
-def wait_tcp(port_num, proc, timeout=12):
+def wait_tcp(port_num, proc, timeout=12, host="127.0.0.1"):
     until = time.monotonic() + timeout
     while time.monotonic() < until:
         if proc.poll() is not None:
             raise RuntimeError("sing-box exited before TCP listener became active")
         try:
-            with socket.create_connection(("127.0.0.1", port_num), 0.3):
+            with socket.create_connection((host, port_num), 0.3):
                 return
         except OSError:
             time.sleep(0.12)
@@ -199,6 +199,30 @@ def main():
                 socks_echo("127.0.0.1", tcp_port, target)
                 socks_echo("::1", tcp_port, target)
                 assert_true(True, "Real native dual-stack TCP listener accepts IPv4 and IPv6")
+            # A concrete IPv6 address must not inadvertently accept IPv4.
+            # Likewise the IPv4-only wildcard must not be reachable via ::1.
+            for mode, listening, permitted, forbidden in (
+                ("ipv4", "0.0.0.0", "127.0.0.1", "::1"),
+                ("ipv6", "::1", "::1", "127.0.0.1"),
+            ):
+                single_port = port()
+                single_config = home / ("tcp-" + mode + ".json")
+                save_json(single_config, {
+                    "log": {"level": "warn"},
+                    "inbounds": [{"type": "socks", "tag": "single-family-test",
+                                  "listen": listening, "listen_port": single_port}],
+                    "outbounds": [{"type": "direct", "tag": "direct"}],
+                    "route": {"final": "direct"}
+                })
+                with Core(single_config, home / ("tcp-" + mode + ".log")) as single:
+                    wait_tcp(single_port, single.proc, host=permitted)
+                    socks_echo(permitted, single_port, target)
+                    try:
+                        with socket.create_connection((forbidden, single_port), timeout=0.6):
+                            raise AssertionError(mode + " listener accepted wrong IP family")
+                    except OSError:
+                        pass
+                    assert_true(True, mode + " listener rejects the other IP family")
             udp_port = port(socket.SOCK_DGRAM)
             ports.probe(("UDP", "::", udp_port))
             ca, cert, key = generate_test_ca(home)
