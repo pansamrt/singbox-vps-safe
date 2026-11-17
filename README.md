@@ -25,6 +25,8 @@ The original upstream installation script is archived under `upstream/fscarmen` 
   checksums and startup rollback, and scoped uninstall.
 - KejiLion and Actions-bbr-v3 are optional **read-only source/status tools**,
   never installed as part of sing-box.
+- Standalone optional Surge Snell v6 installer / sing-box iOS profile generator:
+  [download & usage](docs/SNELL-V6.md). Does not modify the main sing-box setup.
 - WARP IPv4/IPv6 **optional userspace WireGuard outbound** for an explicitly
   selected proxy inbound and destination IP family. Never automatically
   installs or changes the VPS default route. Requires owner-supplied private
