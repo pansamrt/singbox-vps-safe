@@ -1,0 +1,166 @@
+name: Offline QEMU Debian full-VM lifecycle (safe test service only)
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: qemu-fullvm-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  full-vm-lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate guest script syntax without running it
+        run: |
+          set -Eeuo pipefail
+          bash -n tests/vm/guest-smoke.sh
+          test -s tests/vm/README.md
+          echo "Guest lifecycle script syntax PASS; original fscarmen installer not executed."
+      - name: Check KVM device and permit current user on ephemeral runner only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ ! -c /dev/kvm ]; then
+            echo "::error::FULL VM BLOCKED: /dev/kvm device absent from runner"
+            exit 1
+          fi
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            # Modify only this GitHub-hosted ephemeral runner's KVM device
+            # ownership, not a guest, owner's VPS, or host firewall/network.
+            sudo chgrp "$(id -gn)" /dev/kvm
+            sudo chmod 660 /dev/kvm
+          fi
+          python3 - <<'PY'
+          import fcntl
+          import os
+          path = "/dev/kvm"
+          try:
+              with os.fdopen(os.open(path, os.O_RDWR | os.O_CLOEXEC), "rb", closefd=True) as dev:
+                  version = fcntl.ioctl(dev.fileno(), 0xAE00, 0)
+              if version != 12:
+                  raise RuntimeError("Unexpected KVM API version " + str(version))
+          except (OSError, RuntimeError) as exc:
+              raise SystemExit("FULL VM BLOCKED: KVM interface unavailable: " + str(exc))
+          print("KVM device access and API verified on disposable runner")
+          PY
+      - name: Install QEMU and ISO tools on disposable GitHub runner
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 genisoimage
+      - name: Get official Debian 12 cloud image with checksum verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/sbci"
+          BASE="https://cloud.debian.org/images/cloud/bookworm/latest"
+          curl --proto '=https' --tlsv1.2 -fL --retry 3 --max-time 300 \
+            "$BASE/debian-12-genericcloud-amd64.qcow2" \
+            -o "$RUNNER_TEMP/sbci/debian.img"
+          curl --proto '=https' --tlsv1.2 -fL --retry 3 --max-time 30 \
+            "$BASE/SHA512SUMS" -o "$RUNNER_TEMP/sbci/SHA512SUMS"
+          HASH="$(grep -E 'debian-12-genericcloud-amd64.qcow2$' "$RUNNER_TEMP/sbci/SHA512SUMS" | awk '{print $1}')"
+          [[ "$HASH" =~ ^[0-9a-fA-F]{128}$ ]] || { echo "Official checksum not found"; exit 1; }
+          printf '%s  %s\n' "$HASH" "$RUNNER_TEMP/sbci/debian.img" | sha512sum -c -
+      - name: Get fixed sing-box v1.14.4 artifact and verify official SHA256
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          VER=1.14.4
+          BASE="https://github.com/SagerNet/sing-box/releases/download/v$VER"
+          curl --proto '=https' --tlsv1.2 -fL --retry 2 --max-time 90 \
+            "$BASE/sing-box-$VER-linux-amd64.tar.gz" -o "$RUNNER_TEMP/sbci/core.tgz"
+          printf '%s  %s\n' \
+            '699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968' \
+            "$RUNNER_TEMP/sbci/core.tgz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/sbci/payload"
+          tar -xOzf "$RUNNER_TEMP/sbci/core.tgz" \
+            "sing-box-$VER-linux-amd64/sing-box" > "$RUNNER_TEMP/sbci/payload/sing-box"
+          chmod 755 "$RUNNER_TEMP/sbci/payload/sing-box"
+          cp tests/vm/guest-smoke.sh "$RUNNER_TEMP/sbci/payload/guest-smoke.sh"
+          chmod 755 "$RUNNER_TEMP/sbci/payload/guest-smoke.sh"
+      - name: Build read-only NoCloud and payload ISOs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/sbci/seed"
+          cat > "$RUNNER_TEMP/sbci/seed/meta-data" <<'META'
+          instance-id: sbci-github-disposable
+          local-hostname: sbci-test
+          META
+          cat > "$RUNNER_TEMP/sbci/seed/user-data" <<'CLOUD'
+          #cloud-config
+          ssh_pwauth: false
+          disable_root: true
+          network:
+            config: disabled
+          runcmd:
+            # Disposable guest only: avoid a second wait-online timeout after reboot.
+            # No network device is attached to this QEMU guest.
+            - systemctl mask systemd-networkd-wait-online.service
+            - mkdir -p /mnt/sbci
+            - mount -o ro -L SBPAYLOAD /mnt/sbci
+            - bash /mnt/sbci/guest-smoke.sh first
+          power_state:
+            mode: reboot
+            timeout: 600
+            condition: test -f /root/sbci-first-stage-ok
+          CLOUD
+          (
+            cd "$RUNNER_TEMP/sbci/seed"
+            genisoimage -quiet -r -J -V cidata \
+              -o "$RUNNER_TEMP/sbci/seed.iso" user-data meta-data
+          )
+          (
+            cd "$RUNNER_TEMP/sbci/payload"
+            genisoimage -quiet -r -J -V SBPAYLOAD \
+              -o "$RUNNER_TEMP/sbci/payload.iso" sing-box guest-smoke.sh
+          )
+          echo "Verify NoCloud and payload ISO root contents"
+          isoinfo -i "$RUNNER_TEMP/sbci/seed.iso" -J -f | tee "$RUNNER_TEMP/sbci/seed-list"
+          isoinfo -i "$RUNNER_TEMP/sbci/payload.iso" -J -f | tee "$RUNNER_TEMP/sbci/payload-list"
+          grep -Fxq '/user-data' "$RUNNER_TEMP/sbci/seed-list" || exit 1
+          grep -Fxq '/meta-data' "$RUNNER_TEMP/sbci/seed-list" || exit 1
+          grep -Fxq '/guest-smoke.sh' "$RUNNER_TEMP/sbci/payload-list" || exit 1
+      - name: Boot isolated real Debian VM and check install, reboot and uninstall
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          MACHINE="$RUNNER_TEMP/sbci"
+          # VM has no NIC or external network. The guest only sees a disposable
+          # qcow2 overlay and two read-only ISOs. It cannot access host VPS creds.
+          if ! timeout --signal=TERM --kill-after=5s 240s qemu-system-x86_64 \
+            -machine q35,accel=kvm -cpu host -m 2048 -smp 2 \
+            -display none -monitor none -serial "file:$MACHINE/serial.log" \
+            -nic none -snapshot \
+            -smbios "type=1,serial=ds=nocloud" \
+            -drive "file=$MACHINE/debian.img,if=virtio,format=qcow2" \
+            -drive "file=$MACHINE/seed.iso,if=virtio,format=raw,readonly=on" \
+            -drive "file=$MACHINE/payload.iso,if=virtio,format=raw,readonly=on" \
+            > "$MACHINE/qemu.log" 2>&1; then
+            echo "QEMU failed or timed out"
+            tail -n 100 "$MACHINE/qemu.log" || true
+            tail -n 160 "$MACHINE/serial.log" || true
+            exit 1
+          fi
+          for marker in \
+            SBVM_FIRST_STAGE_PASS \
+            SBVM_REBOOT_RECOVERY_PASS \
+            SBVM_FAILED_UPDATE_PREFLIGHT_PASS \
+            SBVM_INSTALL_REBOOT_FAILURE_UNINSTALL_PASS; do
+            if ! grep -Fq "$marker" "$MACHINE/serial.log"; then
+              echo "Missing mandatory VM marker: $marker" >&2
+              tail -n 160 "$MACHINE/serial.log" >&2 || true
+              exit 1
+            fi
+            echo "PASS: $marker"
+          done
+          echo "QEMU Debian 12 safe fixture full-VM lifecycle PASS"
